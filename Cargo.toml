@@ -1,0 +1,18 @@
+[package]
+name = "edex-ui-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Port di eDEX-UI da Electron a Rust (egui + OpenGL), pensato per PC vecchi"
+
+[dependencies]
+eframe = { version = "0.27", default-features = false, features = ["glow", "default_fonts"] }
+portable-pty = "0.8"
+vt100 = "0.15"
+sysinfo = "0.30"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
