@@ -27,10 +27,3 @@ jobs:
         with:
           name: edex-ui-rs-installer
           path: dist/edex-ui-rs-setup.exe
-      - name: Prerelease
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          prerelease: true
-          name: ${{ github.ref_name }}
-          files: dist/edex-ui-rs-setup.exe
