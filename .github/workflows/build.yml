@@ -3,11 +3,14 @@ name: Build Windows
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 jobs:
   windows:
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -18,3 +21,10 @@ jobs:
         with:
           name: edex-ui-rs-windows
           path: target/release/edex-ui-rs.exe
+      - name: Prerelease
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          name: ${{ github.ref_name }}
+          files: target/release/edex-ui-rs.exe
