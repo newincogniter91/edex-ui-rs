@@ -1,3 +1,4 @@
+use crate::audio::Snd;
 use crate::icons::Icons;
 use crate::modules::short;
 use crate::theme::{self, fg_a, px, text, FG};
@@ -11,6 +12,10 @@ pub struct FsDisp {
     disks: Disks,
     icons: Icons,
     drive_kinds: std::collections::HashMap<String, u8>,
+    reveal_t0: f64,
+    revealed: usize,
+    restart_pending: bool,
+    pub sounds: Vec<Snd>,
 }
 
 impl FsDisp {
@@ -20,12 +25,19 @@ impl FsDisp {
             .map(PathBuf::from)
             .or_else(|| std::env::current_dir().ok())
             .unwrap_or_else(|| PathBuf::from("."));
-        let mut f = Self { cwd: Some(start), entries: Vec::new(), disks: Disks::new_with_refreshed_list(), icons: Icons::new(), drive_kinds: Default::default() };
+        let mut f = Self { cwd: Some(start), entries: Vec::new(), disks: Disks::new_with_refreshed_list(), icons: Icons::new(), drive_kinds: Default::default(), reveal_t0: 1e18, revealed: 0, restart_pending: false, sounds: Vec::new() };
         f.reload();
         f
     }
 
+    /// Riparte la comparsa sequenziale delle voci (una ogni 30 ms, con suono).
+    pub fn restart(&mut self, now: f64) {
+        self.reveal_t0 = now;
+        self.revealed = 0;
+    }
+
     fn reload(&mut self) {
+        self.restart_pending = true;
         self.entries.clear();
         match &self.cwd {
             Some(p) => {
@@ -51,7 +63,11 @@ impl FsDisp {
     }
 
     /// Disegna il filesystem; ritorna Some(path) quando si entra in una cartella.
-    pub fn ui(&mut self, ui: &mut egui::Ui, r: Rect, vh: f32) -> Option<PathBuf> {
+    pub fn ui(&mut self, ui: &mut egui::Ui, r: Rect, vh: f32, now: f64) -> Option<PathBuf> {
+        if self.restart_pending && self.reveal_t0 < 1e17 {
+            self.restart(now);
+        }
+        self.restart_pending = false;
         let p = ui.painter_at(r.expand(vh));
         let title = match &self.cwd {
             Some(c) => c.display().to_string(),
@@ -80,7 +96,15 @@ impl FsDisp {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(&mut child, |ui| {
             let (resp_rect, _) = ui.allocate_exact_size(Vec2::new(area.width(), content_h), Sense::hover());
             let pp = ui.painter_at(area);
-            for (i, (name, kind)) in items.iter().enumerate() {
+            let shown = (((now - self.reveal_t0) / 0.03).floor().max(0.0) as usize).min(items.len());
+            if shown > self.revealed {
+                self.sounds.push(Snd::Folder);
+                self.revealed = shown;
+            }
+            if shown < items.len() && self.reveal_t0 < 1e17 {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
+            }
+            for (i, (name, kind)) in items.iter().enumerate().take(shown) {
                 let (cx, cy) = (i % per_row, i / per_row);
                 let tr = Rect::from_min_size(
                     Pos2::new(resp_rect.left() + cx as f32 * (tile + gap), resp_rect.top() + cy as f32 * (tile + gap)),

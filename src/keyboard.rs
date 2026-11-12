@@ -1,5 +1,6 @@
 use crate::theme::{self, fg_a, px, text, BG, FG};
-use eframe::egui::{self, Align2, Pos2, Rect, Sense, Stroke, Vec2};
+use crate::audio::Snd;
+use eframe::egui::{self, Align2, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 struct Key {
     name: String,
@@ -13,6 +14,7 @@ pub struct Keyboard {
     shift: bool,
     ctrl: bool,
     pub flash: Option<(String, f64)>,
+    pub sounds: Vec<Snd>,
 }
 
 impl Keyboard {
@@ -33,7 +35,7 @@ impl Keyboard {
             }
             rows.push(row);
         }
-        Self { rows, shift: false, ctrl: false, flash: None }
+        Self { rows, shift: false, ctrl: false, flash: None, sounds: Vec::new() }
     }
 
     /// Evidenzia il tasto fisico premuto.
@@ -74,6 +76,14 @@ impl Keyboard {
 
                 let id = ui.id().with(("kb", ri, ki));
                 let resp = ui.interact(kr, id, Sense::click());
+                if resp.hovered() {
+                    if ui.input(|i| i.pointer.primary_pressed()) {
+                        self.sounds.push(Snd::Granted);
+                    }
+                    if ui.input(|i| i.pointer.primary_released()) {
+                        self.sounds.push(Snd::Stdin);
+                    }
+                }
                 let active = resp.is_pointer_button_down_on()
                     || (key.name == "SHIFT" && self.shift)
                     || (key.name == "CTRL" && self.ctrl)
@@ -150,4 +160,29 @@ fn arrow(p: &egui::Painter, r: Rect, dir: &str, col: egui::Color32, vh: f32) {
         _ => [c + Vec2::new(s, 0.0), c + Vec2::new(-s * 0.7, -s), c + Vec2::new(-s * 0.7, s)],
     };
     p.add(egui::Shape::convex_polygon(pts.to_vec(), col, Stroke::NONE));
+}
+
+impl Keyboard {
+    /// Animazione di comparsa: ogni riga si allarga con il proprio ritardo, come nell'originale.
+    pub fn veil(&self, p: &egui::Painter, r: Rect, vh: f32, t: f64, alpha: f32) {
+        let rows = self.rows.len().max(1);
+        let row_h = r.height() / rows as f32;
+        let delay = [0.3, 0.2, 0.0, 0.25, 0.2];
+        let dur = [0.7, 0.7, 0.7, 0.7, 0.6];
+        for i in 0..rows {
+            let f = (((t - delay[i.min(4)]) / dur[i.min(4)]).clamp(0.0, 1.0)) as f32;
+            if f < 1.0 {
+                let y = r.top() + row_h * i as f32;
+                let x0 = r.left() + r.width() * f;
+                p.rect_filled(
+                    Rect::from_min_max(Pos2::new(x0, y - vh * 0.3), Pos2::new(r.right() + vh, y + row_h)),
+                    0.0,
+                    Color32::from_rgb(5, 8, 13),
+                );
+            }
+        }
+        if alpha < 0.999 {
+            p.rect_filled(r.expand(vh * 0.5), 0.0, Color32::from_rgba_unmultiplied(5, 8, 13, ((1.0 - alpha) * 255.0) as u8));
+        }
+    }
 }

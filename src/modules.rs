@@ -1,11 +1,31 @@
 use crate::hw::Hw;
 use crate::theme::{self, fg_a, px, text, FG};
-use eframe::egui::{Align2, Painter, Pos2, Rect, Shape, Stroke, Vec2};
+use eframe::egui::{Align2, Color32, Painter, Pos2, Rect, Shape, Stroke, Vec2};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 use sysinfo::{Networks, System};
 
 const HISTORY: usize = 60;
+
+/// Opacità di comparsa (animazione iniziale): titoli di colonna e singoli moduli.
+pub struct Fade {
+    pub title: f32,
+    pub left: [f32; 6],
+    pub right: [f32; 3],
+}
+
+impl Fade {
+    pub fn full() -> Self {
+        Self { title: 1.0, left: [1.0; 6], right: [1.0; 3] }
+    }
+}
+
+fn veil(p: &Painter, r: Rect, a: f32, vh: f32) {
+    if a < 0.999 {
+        let rr = Rect::from_min_max(Pos2::new(r.left() - vh * 0.6, r.top() - vh * 0.4), Pos2::new(r.right() + vh * 0.6, r.bottom()));
+        p.rect_filled(rr, 0.0, Color32::from_rgba_unmultiplied(5, 8, 13, ((1.0 - a.max(0.0)) * 255.0) as u8));
+    }
+}
 
 pub struct SysPanels {
     sys: System,
@@ -109,28 +129,39 @@ impl SysPanels {
 
     // ------------------------------------------------------------ colonne
 
-    pub fn left_column(&self, p: &Painter, col: Rect, vh: f32) {
+    pub fn left_column(&self, p: &Painter, col: Rect, vh: f32, fa: &Fade) {
         let inner = col.shrink2(Vec2::new(vh * 1.39, 0.0));
         theme::title_bar(p, Rect::from_min_size(Pos2::new(inner.left(), col.top() + vh * 0.2), Vec2::new(inner.width(), vh * 1.6)), "PANEL", "SYSTEM", vh);
+        veil(p, Rect::from_min_size(Pos2::new(inner.left(), col.top() + vh * 0.2), Vec2::new(inner.width(), vh * 1.6)), fa.title, vh);
         let heights = [6.3, 4.8, 6.3, 16.0, 11.4, 12.0];
         let rects = distribute(inner, col.top() + vh * 3.2, col.bottom() - vh * 0.2, &heights, vh);
         self.clock(p, rects[0], vh);
+        veil(p, rects[0], fa.left[0], vh);
         self.sysinfo(p, rects[1], vh);
+        veil(p, rects[1], fa.left[1], vh);
         self.hardware(p, rects[2], vh);
+        veil(p, rects[2], fa.left[2], vh);
         self.cpu(p, rects[3], vh);
+        veil(p, rects[3], fa.left[3], vh);
         self.ram(p, rects[4], vh);
+        veil(p, rects[4], fa.left[4], vh);
         self.toplist(p, rects[5], vh);
+        veil(p, rects[5], fa.left[5], vh);
     }
 
-    pub fn right_column(&self, p: &Painter, col: Rect, vh: f32) {
+    pub fn right_column(&self, p: &Painter, col: Rect, vh: f32, fa: &Fade) {
         let inner = col.shrink2(Vec2::new(vh * 1.39, 0.0));
         theme::title_bar(p, Rect::from_min_size(Pos2::new(inner.left(), col.top() + vh * 0.2), Vec2::new(inner.width(), vh * 1.6)), "PANEL", "NETWORK", vh);
+        veil(p, Rect::from_min_size(Pos2::new(inner.left(), col.top() + vh * 0.2), Vec2::new(inner.width(), vh * 1.6)), fa.title, vh);
         let globe_h = (inner.width() / vh + 3.0).min(32.0);
         let heights = [9.0, globe_h, 18.0];
         let rects = distribute(inner, col.top() + vh * 3.2, col.bottom() - vh * 0.2, &heights, vh);
         self.netstat(p, rects[0], vh);
+        veil(p, rects[0], fa.right[0], vh);
         self.globe(p, rects[1], vh);
+        veil(p, rects[1], fa.right[1], vh);
         self.conninfo(p, rects[2], vh);
+        veil(p, rects[2], fa.right[2], vh);
     }
 
     // ------------------------------------------------------------ moduli sinistra

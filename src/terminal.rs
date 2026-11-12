@@ -2,6 +2,7 @@ use crate::theme;
 use eframe::egui::{self, Color32, EventFilter, FontId, Key, Pos2, Rect, Sense, Vec2};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub struct Terminal {
@@ -11,6 +12,7 @@ pub struct Terminal {
     cols: u16,
     rows: u16,
     scroll: usize,
+    out: Arc<AtomicBool>,
 }
 
 impl Terminal {
@@ -39,6 +41,8 @@ impl Terminal {
         let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 3000)));
         let p2 = parser.clone();
         let ctx2 = ctx.clone();
+        let out = Arc::new(AtomicBool::new(false));
+        let out2 = out.clone();
         std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
@@ -48,13 +52,19 @@ impl Terminal {
                         if let Ok(mut p) = p2.lock() {
                             p.process(&buf[..n]);
                         }
+                        out2.store(true, Ordering::Relaxed);
                         ctx2.request_repaint();
                     }
                 }
             }
         });
 
-        Ok(Self { parser, writer, master: pair.master, cols, rows, scroll: 0 })
+        Ok(Self { parser, writer, master: pair.master, cols, rows, scroll: 0, out })
+    }
+
+    /// True se è arrivato output dall'ultima chiamata (per il suono stdout).
+    pub fn take_output(&self) -> bool {
+        self.out.swap(false, Ordering::Relaxed)
     }
 
     pub fn send(&mut self, s: &str) {
