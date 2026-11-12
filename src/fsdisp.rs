@@ -10,6 +10,7 @@ pub struct FsDisp {
     entries: Vec<(String, bool)>,
     disks: Disks,
     icons: Icons,
+    drive_kinds: std::collections::HashMap<String, u8>,
 }
 
 impl FsDisp {
@@ -19,7 +20,7 @@ impl FsDisp {
             .map(PathBuf::from)
             .or_else(|| std::env::current_dir().ok())
             .unwrap_or_else(|| PathBuf::from("."));
-        let mut f = Self { cwd: Some(start), entries: Vec::new(), disks: Disks::new_with_refreshed_list(), icons: Icons::new() };
+        let mut f = Self { cwd: Some(start), entries: Vec::new(), disks: Disks::new_with_refreshed_list(), icons: Icons::new(), drive_kinds: Default::default() };
         f.reload();
         f
     }
@@ -38,9 +39,12 @@ impl FsDisp {
                 self.entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())));
             }
             None => {
+                // le unità si rileggono ogni volta che si apre la vista
                 self.disks.refresh_list();
-                for d in self.disks.list() {
-                    self.entries.push((d.mount_point().to_string_lossy().to_string(), true));
+                self.drive_kinds.clear();
+                for (n, k) in list_drives(&self.disks) {
+                    self.drive_kinds.insert(n.clone(), k);
+                    self.entries.push((n, true));
                 }
             }
         }
@@ -67,7 +71,7 @@ impl FsDisp {
             items.push(("..".into(), 2));
         }
         for (n, d) in &self.entries {
-            items.push((n.clone(), if self.cwd.is_none() { 4 } else if *d { 1 } else { 0 }));
+            items.push((n.clone(), if self.cwd.is_none() { self.drive_kinds.get(n).copied().unwrap_or(4) } else if *d { 1 } else { 0 }));
         }
 
         let rows = (items.len() + per_row - 1) / per_row;
@@ -90,6 +94,8 @@ impl FsDisp {
                     0 | 1 => self.icons.for_entry(name, *kind == 1),
                     2 => self.icons.core("up"),
                     3 => self.icons.core("showDisks"),
+                    5 => self.icons.core("usb"),
+                    6 => self.icons.core("rom"),
                     _ => self.icons.core("disk"),
                 };
                 let isz = if *kind >= 2 { vh * 4.0 } else { vh * 5.0 };
@@ -102,7 +108,7 @@ impl FsDisp {
                     match kind {
                         3 => nav = Some(None),
                         2 => nav = Some(self.cwd.as_ref().and_then(|c| c.parent().map(|x| x.to_path_buf()))),
-                        1 => {
+                        1 | 4 | 5 | 6 => {
                             nav = Some(Some(match &self.cwd {
                                 Some(c) => c.join(name),
                                 None => PathBuf::from(name),
@@ -166,4 +172,34 @@ impl FsDisp {
 
 fn path_starts(p: &Path, base: &Path) -> bool {
     p.starts_with(base)
+}
+
+/// Elenco delle unità presenti in questo momento (nome, tipo: 4 disco, 5 rimovibile, 6 ottico).
+#[cfg(windows)]
+fn list_drives(_d: &Disks) -> Vec<(String, u8)> {
+    extern "system" {
+        fn GetLogicalDrives() -> u32;
+        fn GetDriveTypeW(root: *const u16) -> u32;
+    }
+    let mask = unsafe { GetLogicalDrives() };
+    let mut v = Vec::new();
+    for i in 0..26u32 {
+        if mask & (1 << i) != 0 {
+            let name = format!("{}:\\", (b'A' + i as u8) as char);
+            let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+            let t = unsafe { GetDriveTypeW(wide.as_ptr()) };
+            let kind = match t {
+                2 => 5,
+                5 => 6,
+                _ => 4,
+            };
+            v.push((name, kind));
+        }
+    }
+    v
+}
+
+#[cfg(not(windows))]
+fn list_drives(d: &Disks) -> Vec<(String, u8)> {
+    d.list().iter().map(|x| (x.mount_point().to_string_lossy().to_string(), 4)).collect()
 }
