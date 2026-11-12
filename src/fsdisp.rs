@@ -1,6 +1,7 @@
+use crate::icons::Icons;
 use crate::modules::short;
-use crate::theme::{self, fg_a, px, text, BG, FG};
-use eframe::egui::{self, Align2, Painter, Pos2, Rect, Sense, Shape, Stroke, Vec2};
+use crate::theme::{self, fg_a, px, text, FG};
+use eframe::egui::{self, Align2, Painter, Pos2, Rect, Sense, Stroke, Vec2};
 use std::path::{Path, PathBuf};
 use sysinfo::Disks;
 
@@ -8,6 +9,7 @@ pub struct FsDisp {
     cwd: Option<PathBuf>, // None = elenco unità
     entries: Vec<(String, bool)>,
     disks: Disks,
+    icons: Icons,
 }
 
 impl FsDisp {
@@ -17,7 +19,7 @@ impl FsDisp {
             .map(PathBuf::from)
             .or_else(|| std::env::current_dir().ok())
             .unwrap_or_else(|| PathBuf::from("."));
-        let mut f = Self { cwd: Some(start), entries: Vec::new(), disks: Disks::new_with_refreshed_list() };
+        let mut f = Self { cwd: Some(start), entries: Vec::new(), disks: Disks::new_with_refreshed_list(), icons: Icons::new() };
         f.reload();
         f
     }
@@ -59,13 +61,13 @@ impl FsDisp {
         let per_row = (((area.width() + gap) / (tile + gap)).floor() as usize).max(1);
 
         let mut nav: Option<Option<PathBuf>> = None;
-        let mut items: Vec<(String, u8)> = Vec::new(); // 0 file, 1 dir, 2 su, 3 dischi
+        let mut items: Vec<(String, u8)> = Vec::new(); // 0 file, 1 dir, 2 su, 3 dischi, 4 disco
         if self.cwd.is_some() {
             items.push(("DISKS".into(), 3));
             items.push(("..".into(), 2));
         }
         for (n, d) in &self.entries {
-            items.push((n.clone(), if *d { 1 } else { 0 }));
+            items.push((n.clone(), if self.cwd.is_none() { 4 } else if *d { 1 } else { 0 }));
         }
 
         let rows = (items.len() + per_row - 1) / per_row;
@@ -84,7 +86,17 @@ impl FsDisp {
                 if resp.hovered() {
                     pp.rect_filled(tr, 0.0, fg_a(0.12));
                 }
-                draw_icon(&pp, tr, *kind, vh);
+                let idx = match kind {
+                    0 | 1 => self.icons.for_entry(name, *kind == 1),
+                    2 => self.icons.core("up"),
+                    3 => self.icons.core("showDisks"),
+                    _ => self.icons.core("disk"),
+                };
+                let isz = if *kind >= 2 { vh * 4.0 } else { vh * 5.0 };
+                if let Some(tid) = self.icons.texture(ui.ctx(), idx) {
+                    let ir = Rect::from_center_size(Pos2::new(tr.center().x, tr.top() + vh * 3.4), Vec2::splat(isz));
+                    pp.image(tid, ir, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), egui::Color32::WHITE);
+                }
                 text(&pp, tr.center().x, tr.bottom() - vh * 1.2, Align2::CENTER_CENTER, short(name, 12), vh * 1.3, FG, "main");
                 if resp.clicked() {
                     match kind {
@@ -154,47 +166,4 @@ impl FsDisp {
 
 fn path_starts(p: &Path, base: &Path) -> bool {
     p.starts_with(base)
-}
-
-fn draw_icon(p: &Painter, r: Rect, kind: u8, vh: f32) {
-    let st = Stroke::new(px(vh, 0.2), FG);
-    let c = Pos2::new(r.center().x, r.top() + r.height() * 0.38);
-    let s = vh * 2.5;
-    match kind {
-        1 => {
-            // cartella
-            let b = Rect::from_center_size(c + Vec2::new(0.0, s * 0.1), Vec2::new(s * 1.9, s * 1.4));
-            let tab = Rect::from_min_size(b.left_top() - Vec2::new(0.0, s * 0.3), Vec2::new(s * 0.8, s * 0.3));
-            p.rect_stroke(b, 0.0, st);
-            p.rect_stroke(tab, 0.0, st);
-        }
-        2 => {
-            // su
-            let pts = vec![c + Vec2::new(0.0, -s * 0.9), c + Vec2::new(s * 0.9, s * 0.6), c + Vec2::new(-s * 0.9, s * 0.6), c + Vec2::new(0.0, -s * 0.9)];
-            p.add(Shape::line(pts, st));
-        }
-        3 => {
-            // dischi
-            p.rect_stroke(Rect::from_center_size(c, Vec2::new(s * 1.9, s * 1.2)), vh * 0.3, st);
-            p.circle_filled(c + Vec2::new(s * 0.6, 0.0), vh * 0.3, FG);
-        }
-        _ => {
-            // file con angolo piegato
-            let (w, h) = (s * 1.4, s * 1.8);
-            let o = c - Vec2::new(w / 2.0, h / 2.0);
-            let f = s * 0.5;
-            let pts = vec![
-                o,
-                o + Vec2::new(w - f, 0.0),
-                o + Vec2::new(w, f),
-                o + Vec2::new(w, h),
-                o + Vec2::new(0.0, h),
-                o,
-            ];
-            p.add(Shape::line(pts, st));
-            p.line_segment([o + Vec2::new(w - f, 0.0), o + Vec2::new(w - f, f)], st);
-            p.line_segment([o + Vec2::new(w - f, f), o + Vec2::new(w, f)], st);
-        }
-    }
-    let _ = BG;
 }

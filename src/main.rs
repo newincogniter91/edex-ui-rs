@@ -1,6 +1,8 @@
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
 mod fsdisp;
+mod hw;
+mod icons;
 mod keyboard;
 mod modules;
 mod shell;
@@ -123,7 +125,7 @@ impl eframe::App for App {
                 // ---- colonne laterali (17% ciascuna)
                 let col_w = w * 0.17;
                 let col_top = screen.top() + vh * 2.5;
-                let col_h = vh * 96.0;
+                let col_h = vh * 63.7;
                 let left = Rect::from_min_size(Pos2::new(screen.left() - vh * 0.555, col_top), Vec2::new(col_w, col_h));
                 let right = Rect::from_min_size(Pos2::new(screen.right() - col_w + vh * 0.555, col_top), Vec2::new(col_w, col_h));
                 self.sys.left_column(&p, left, vh);
@@ -195,8 +197,7 @@ impl eframe::App for App {
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([960.0, 560.0])
+            .with_fullscreen(true)
             .with_title("eDEX-UI RS"),
         vsync: true,
         multisampling: 0,

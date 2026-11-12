@@ -1,3 +1,4 @@
+use crate::hw::Hw;
 use crate::theme::{self, fg_a, px, text, FG};
 use eframe::egui::{Align2, Painter, Pos2, Rect, Shape, Stroke, Vec2};
 use std::collections::VecDeque;
@@ -21,6 +22,8 @@ pub struct SysPanels {
     tx_hist: VecDeque<f32>,
     iface: String,
     pub globe_phase: f32,
+    land: Vec<(f32, f32, f32)>, // sin(lat), cos(lat), lon
+    hw: Hw,
 }
 
 impl SysPanels {
@@ -45,6 +48,8 @@ impl SysPanels {
             tx_hist: VecDeque::from(vec![0.0; HISTORY]),
             iface: String::from("--"),
             globe_phase: 0.0,
+            land: load_land(),
+            hw: crate::hw::spawn(),
         }
     }
 
@@ -107,8 +112,8 @@ impl SysPanels {
     pub fn left_column(&self, p: &Painter, col: Rect, vh: f32) {
         let inner = col.shrink2(Vec2::new(vh * 1.39, 0.0));
         theme::title_bar(p, Rect::from_min_size(Pos2::new(inner.left(), col.top() + vh * 0.2), Vec2::new(inner.width(), vh * 1.6)), "PANEL", "SYSTEM", vh);
-        let heights = [7.4, 5.6, 9.0, 21.0, 15.0, 15.0];
-        let rects = distribute(inner, col.top() + vh * 3.2, col.bottom() - vh * 1.5, &heights, vh);
+        let heights = [6.3, 4.8, 6.3, 16.0, 11.4, 12.0];
+        let rects = distribute(inner, col.top() + vh * 3.2, col.bottom() - vh * 0.2, &heights, vh);
         self.clock(p, rects[0], vh);
         self.sysinfo(p, rects[1], vh);
         self.hardware(p, rects[2], vh);
@@ -120,9 +125,9 @@ impl SysPanels {
     pub fn right_column(&self, p: &Painter, col: Rect, vh: f32) {
         let inner = col.shrink2(Vec2::new(vh * 1.39, 0.0));
         theme::title_bar(p, Rect::from_min_size(Pos2::new(inner.left(), col.top() + vh * 0.2), Vec2::new(inner.width(), vh * 1.6)), "PANEL", "NETWORK", vh);
-        let globe_h = (inner.width() * 1.0 / vh + 6.0).min(40.0);
-        let heights = [14.0, globe_h, 23.0];
-        let rects = distribute(inner, col.top() + vh * 3.2, col.bottom() - vh * 1.5, &heights, vh);
+        let globe_h = (inner.width() / vh + 3.0).min(32.0);
+        let heights = [9.0, globe_h, 18.0];
+        let rects = distribute(inner, col.top() + vh * 3.2, col.bottom() - vh * 0.2, &heights, vh);
         self.netstat(p, rects[0], vh);
         self.globe(p, rects[1], vh);
         self.conninfo(p, rects[2], vh);
@@ -161,10 +166,12 @@ impl SysPanels {
 
     fn hardware(&self, p: &Painter, r: Rect, vh: f32) {
         theme::module_frame(p, r, vh);
-        let host = System::host_name().unwrap_or_else(|| "--".into());
-        let os = System::name().unwrap_or_else(|| "--".into());
-        let kernel = System::kernel_version().unwrap_or_else(|| "--".into());
-        let cols: [(String, String); 3] = [("SYSTEM".into(), os), ("HOST".into(), host), ("KERNEL".into(), kernel)];
+        let v = self.hw.lock().ok().and_then(|g| g.clone()).unwrap_or_else(|| ["...".into(), "...".into(), "...".into()]);
+        let cols: [(String, String); 3] = [
+            ("MANUFACTURER".into(), v[0].clone()),
+            ("MODEL".into(), v[1].clone()),
+            ("CHASSIS".into(), v[2].clone()),
+        ];
         cells(p, r, &cols, vh, 1.3);
     }
 
@@ -177,8 +184,8 @@ impl SysPanels {
         let half = (n + 1) / 2;
         let w = r.width() * 0.76;
         let x0 = r.left() + (r.width() - w) / 2.0;
-        let h = vh * 4.167;
-        let mut y = r.top() + vh * 3.4;
+        let h = vh * 3.6;
+        let mut y = r.top() + vh * 3.2;
         for (i, range) in [(0, half), (half, n)].iter().enumerate() {
             let cr = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(w, h));
             dashed_box(p, cr, vh);
@@ -186,7 +193,7 @@ impl SysPanels {
                 line_chart(p, cr, &self.core_hist[c], 100.0, if c % 2 == 0 { 1.0 } else { 0.55 }, vh);
             }
             text_small(p, cr.left() - vh * 0.5, cr.center().y, Align2::RIGHT_CENTER, format!("#{}", i * half + 1), vh);
-            y += h + vh * 0.9;
+            y += h + vh * 0.7;
         }
         // riga inferiore
         let freq = self.sys.cpus().first().map(|c| c.frequency()).unwrap_or(0) as f32 / 1000.0;
@@ -219,7 +226,7 @@ impl SysPanels {
         let n = cols * rows;
         let active = (((total - avail) / total) * n as f64).round() as usize;
         let free_n = ((free / total) * n as f64).round() as usize;
-        let area = Rect::from_min_max(Pos2::new(r.left(), r.top() + vh * 3.4), Pos2::new(r.right(), r.top() + vh * 3.4 + vh * 6.3));
+        let area = Rect::from_min_max(Pos2::new(r.left(), r.top() + vh * 3.2), Pos2::new(r.right(), r.top() + vh * 3.2 + vh * 5.2));
         let sx = area.width() / cols as f32;
         let sy = area.height() / rows as f32;
         for i in 0..n {
@@ -237,7 +244,7 @@ impl SysPanels {
 
         // swap
         let (st, su) = (self.sys.total_swap() as f64, self.sys.used_swap() as f64);
-        let y = area.bottom() + vh * 1.2;
+        let y = area.bottom() + vh * 1.0;
         text(p, r.left(), y, Align2::LEFT_CENTER, "SWAP", vh * 1.3, FG, "main");
         text(p, r.right(), y, Align2::RIGHT_CENTER, format!("{:.1} GB", su / gb), vh * 1.3, FG, "main");
         let bar = Rect::from_min_size(Pos2::new(r.left(), y + vh * 1.1), Vec2::new(r.width(), vh * 0.4));
@@ -249,14 +256,14 @@ impl SysPanels {
     fn toplist(&self, p: &Painter, r: Rect, vh: f32) {
         theme::module_frame(p, r, vh);
         header(p, r, "TOP PROCESSES", "PID | NAME | CPU | MEM", vh);
-        let mut y = r.top() + vh * 3.6;
+        let mut y = r.top() + vh * 3.4;
         for (pid, name, cpu, mem) in &self.top {
             let sz = vh * 1.5;
             text(p, r.left(), y, Align2::LEFT_CENTER, pid, sz, FG, "main");
             text(p, r.left() + r.width() * 0.2, y, Align2::LEFT_CENTER, short(name, 13), sz, FG, "main");
             text(p, r.left() + r.width() * 0.76, y, Align2::RIGHT_CENTER, format!("{cpu:.0}%"), sz, FG, "main");
             text(p, r.right(), y, Align2::RIGHT_CENTER, format!("{mem:.0}%"), sz, FG, "main");
-            y += vh * 2.1;
+            y += vh * 1.75;
         }
     }
 
@@ -271,54 +278,41 @@ impl SysPanels {
             ("DOWN".into(), format!("{}/s", bytes(self.rx_rate))),
             ("UP".into(), format!("{}/s", bytes(self.tx_rate))),
         ];
-        let row = Rect::from_min_max(Pos2::new(r.left(), r.top() + vh * 3.4), r.right_bottom());
+        let row = Rect::from_min_max(Pos2::new(r.left(), r.top() + vh * 3.0), r.right_bottom());
         cells(p, row, &cols, vh, 1.3);
     }
 
     fn globe(&self, p: &Painter, r: Rect, vh: f32) {
         theme::module_frame(p, r, vh);
         header(p, r, "WORLD VIEW", "ENDPOINT LAT/LON: 0.0, 0.0", vh);
-        let area = Rect::from_min_max(Pos2::new(r.left(), r.top() + vh * 3.0), r.right_bottom());
-        let rad = (area.width().min(area.height()) * 0.46).max(10.0);
+        let area = Rect::from_min_max(Pos2::new(r.left(), r.top() + vh * 2.6), r.right_bottom());
+        let rad = (area.width().min(area.height()) * 0.47).max(10.0);
         let c = area.center();
         let ph = self.globe_phase;
-        let st = Stroke::new(px(vh, 0.1), fg_a(0.55));
-        // meridiani
-        for k in 0..12 {
-            let lon = ph + k as f32 * std::f32::consts::TAU / 12.0;
-            let pts: Vec<Pos2> = (0..=24)
-                .filter_map(|i| {
-                    let lat = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 24.0;
-                    let (x, y, z) = (lat.cos() * lon.sin(), lat.sin(), lat.cos() * lon.cos());
-                    if z >= 0.0 { Some(Pos2::new(c.x + x * rad, c.y - y * rad)) } else { None }
-                })
-                .collect();
-            if pts.len() > 1 {
-                p.add(Shape::line(pts, st));
+        let tilt = 0.32f32;
+        let (st, ct) = (tilt.sin(), tilt.cos());
+        let dot = (rad * 0.03).max(1.0);
+        for (slat, clat, lon) in &self.land {
+            let l = lon + ph;
+            let (x, y, z) = (clat * l.sin(), *slat, clat * l.cos());
+            let (y2, z2) = (y * ct - z * st, y * st + z * ct);
+            if z2 > 0.0 {
+                let a = 0.35 + 0.65 * z2;
+                p.rect_filled(
+                    Rect::from_center_size(Pos2::new(c.x + x * rad, c.y - y2 * rad), Vec2::splat(dot)),
+                    0.0,
+                    fg_a(a),
+                );
             }
         }
-        // paralleli
-        for k in 1..6 {
-            let lat = -std::f32::consts::FRAC_PI_2 + k as f32 * std::f32::consts::PI / 6.0;
-            let (y, rr) = (lat.sin() * rad, lat.cos() * rad);
-            let pts: Vec<Pos2> = (0..=48)
-                .filter_map(|i| {
-                    let lon = ph + i as f32 * std::f32::consts::TAU / 48.0;
-                    if lon.cos() >= 0.0 { Some(Pos2::new(c.x + rr * lon.sin(), c.y - y)) } else { None }
-                })
-                .collect();
-            if pts.len() > 1 {
-                p.add(Shape::line(pts, st));
-            }
-        }
-        p.circle_stroke(c, rad, Stroke::new(px(vh, 0.14), fg_a(0.8)));
+        p.circle_stroke(c, rad, Stroke::new(px(vh, 0.1), fg_a(0.25)));
     }
 
     fn conninfo(&self, p: &Painter, r: Rect, vh: f32) {
         theme::module_frame(p, r, vh);
         header(p, r, "NETWORK TRAFFIC", "UP/DOWN, BYTES/S", vh);
-        let h = vh * 8.7;
-        let top = Rect::from_min_size(Pos2::new(r.left(), r.top() + vh * 3.4), Vec2::new(r.width(), h));
+        let h = ((r.height() - vh * 3.2 - vh * 3.0 - vh * 0.5) / 2.0).max(vh * 2.0);
+        let top = Rect::from_min_size(Pos2::new(r.left(), r.top() + vh * 3.2), Vec2::new(r.width(), h));
         let bot = Rect::from_min_size(Pos2::new(r.left(), top.bottom() + vh * 0.5), Vec2::new(r.width(), h));
         dashed_box(p, top, vh);
         dashed_box(p, bot, vh);
@@ -326,21 +320,40 @@ impl SysPanels {
         line_chart(p, top, &self.tx_hist, mx(&self.tx_hist), 1.0, vh);
         line_chart(p, bot, &self.rx_hist, mx(&self.rx_hist), 1.0, vh);
         let tot = bytes(self.rx_total + self.tx_total);
-        text(p, r.center().x, r.bottom() - vh * 1.2, Align2::CENTER_CENTER, format!("TOTAL {tot}"), vh * 2.0, FG, "main");
+        text(p, r.center().x, r.bottom() - vh * 1.1, Align2::CENTER_CENTER, format!("TOTAL {tot}"), vh * 1.8, FG, "main");
     }
+}
+
+fn load_land() -> Vec<(f32, f32, f32)> {
+    let v: Vec<[f32; 2]> = serde_json::from_str(include_str!("../assets/globe_land.json")).unwrap_or_default();
+    v.into_iter()
+        .map(|[lat, lon]| {
+            let la = lat.to_radians();
+            (la.sin(), la.cos(), lon.to_radians())
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------- helper
 
 fn distribute(inner: Rect, top: f32, bottom: f32, heights: &[f32], vh: f32) -> Vec<Rect> {
-    let sum: f32 = heights.iter().map(|h| h * vh).sum();
-    let gap = ((bottom - top - sum) / (heights.len().max(2) - 1) as f32).max(vh * 0.8);
+    let n = heights.len();
+    let mut sum: f32 = heights.iter().map(|h| h * vh).sum();
+    let min_gap = vh * 0.6;
+    let avail = bottom - top;
+    let mut scale = 1.0;
+    if sum + min_gap * (n as f32 - 1.0) > avail {
+        scale = ((avail - min_gap * (n as f32 - 1.0)) / sum).max(0.3);
+        sum *= scale;
+    }
+    let gap = ((avail - sum) / (n.max(2) - 1) as f32).max(min_gap);
     let mut y = top;
     heights
         .iter()
         .map(|h| {
-            let r = Rect::from_min_size(Pos2::new(inner.left(), y), Vec2::new(inner.width(), h * vh));
-            y += h * vh + gap;
+            let hh = h * vh * scale;
+            let r = Rect::from_min_size(Pos2::new(inner.left(), y), Vec2::new(inner.width(), hh));
+            y += hh + gap;
             r
         })
         .collect()
