@@ -152,6 +152,22 @@ impl eframe::App for App {
             }
         }
 
+        // shell terminate (exit): la tab si svuota; se non resta nessun terminale, l'app si chiude
+        if term_visible {
+            for slot in self.terms.iter_mut() {
+                if slot.as_mut().map(|t| t.exited()).unwrap_or(false) {
+                    *slot = None;
+                }
+            }
+            if self.terms.iter().all(|t| t.is_none()) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            } else if self.terms[self.active].is_none() {
+                if let Some(i) = self.terms.iter().position(|t| t.is_some()) {
+                    self.active = i;
+                }
+            }
+        }
+
         // tasti fisici -> evidenzia sulla tastiera virtuale
         for e in &events {
             if let egui::Event::Text(tx) = e {
@@ -233,12 +249,12 @@ impl eframe::App for App {
                     let tabs_rect = Rect::from_min_size(shell.min, Vec2::new(shell.width(), tab_h));
                     let labels: Vec<String> = (0..5)
                         .map(|i| {
-                            if i == 0 {
-                                "MAIN SHELL".to_string()
-                            } else if self.terms[i].is_some() {
-                                format!("SHELL #{}", i + 1)
-                            } else {
+                            if self.terms[i].is_none() {
                                 "EMPTY".to_string()
+                            } else if i == 0 {
+                                "MAIN SHELL".to_string()
+                            } else {
+                                format!("SHELL #{}", i + 1)
                             }
                         })
                         .collect();

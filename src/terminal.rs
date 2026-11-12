@@ -1,6 +1,6 @@
 use crate::theme;
 use eframe::egui::{self, Color32, EventFilter, FontId, Key, Pos2, Rect, Sense, Vec2};
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -13,6 +13,7 @@ pub struct Terminal {
     rows: u16,
     scroll: usize,
     out: Arc<AtomicBool>,
+    child: Box<dyn Child + Send + Sync>,
 }
 
 impl Terminal {
@@ -23,7 +24,7 @@ impl Terminal {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
         let cmd = default_shell();
-        let _child = pair
+        let child = pair
             .slave
             .spawn_command(cmd)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
@@ -59,12 +60,17 @@ impl Terminal {
             }
         });
 
-        Ok(Self { parser, writer, master: pair.master, cols, rows, scroll: 0, out })
+        Ok(Self { parser, writer, master: pair.master, cols, rows, scroll: 0, out, child })
     }
 
     /// True se è arrivato output dall'ultima chiamata (per il suono stdout).
     pub fn take_output(&self) -> bool {
         self.out.swap(false, Ordering::Relaxed)
+    }
+
+    /// True quando la shell è terminata (exit).
+    pub fn exited(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(Some(_)))
     }
 
     pub fn send(&mut self, s: &str) {
