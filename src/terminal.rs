@@ -74,11 +74,10 @@ impl Terminal {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
-        let font = FontId::monospace(14.0);
+    pub fn ui(&mut self, ui: &mut egui::Ui, rect: Rect, id: egui::Id, size: f32) {
+        let font = theme::font(size, "mono");
         let (cw, rh) = ui.fonts(|f| (f.glyph_width(&font, 'M'), f.row_height(&font)));
-        let avail = ui.available_size();
-        let (rect, resp) = ui.allocate_exact_size(avail, Sense::click());
+        let resp = ui.interact(rect, id, Sense::click());
 
         // il terminale tiene sempre il focus e cattura Tab/Esc/frecce
         resp.request_focus();
