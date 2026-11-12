@@ -359,7 +359,8 @@ fn load_land() -> Vec<(f32, f32, f32)> {
     let v: Vec<[f32; 2]> = serde_json::from_str(include_str!("../assets/globe_land.json")).unwrap_or_default();
     v.into_iter()
         .map(|[lat, lon]| {
-            let la = lat.to_radians();
+            // nei dati dell'originale la latitudine ha il segno invertito (verificato sui poligoni dei continenti)
+            let la = (-lat).to_radians();
             (la.sin(), la.cos(), lon.to_radians())
         })
         .collect()
