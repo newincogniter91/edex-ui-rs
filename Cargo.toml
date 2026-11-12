@@ -13,6 +13,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde_json = "1"
 regex = "1"
 flate2 = "1"
+arboard = { version = "3", default-features = false }
 rodio = { version = "0.19", default-features = false, features = ["wav"] }
 
 [profile.release]

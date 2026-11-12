@@ -73,6 +73,23 @@ impl Terminal {
         matches!(self.child.try_wait(), Ok(Some(_)))
     }
 
+    /// Click destro: incolla il testo della clipboard nel terminale.
+    fn paste_clipboard(&mut self) {
+        let Ok(mut cb) = arboard::Clipboard::new() else { return };
+        let Ok(text) = cb.get_text() else { return };
+        if text.is_empty() {
+            return;
+        }
+        let text = text.replace("\r\n", "\r").replace('\n', "\r");
+        let bracketed = self.parser.lock().map(|p| p.screen().bracketed_paste()).unwrap_or(false);
+        self.scroll = 0;
+        if bracketed {
+            self.send(&format!("\x1b[200~{text}\x1b[201~"));
+        } else {
+            self.send(&text);
+        }
+    }
+
     pub fn send(&mut self, s: &str) {
         let _ = self.writer.write_all(s.as_bytes());
         let _ = self.writer.flush();
@@ -97,6 +114,9 @@ impl Terminal {
 
         // il terminale tiene sempre il focus e cattura Tab/Esc/frecce
         resp.request_focus();
+        if resp.secondary_clicked() {
+            self.paste_clipboard();
+        }
         ui.memory_mut(|m| {
             m.set_focus_lock_filter(
                 resp.id,
