@@ -124,7 +124,7 @@ pub fn shortcuts_window(ctx: &egui::Context, open: &mut bool) {
         ("Ctrl+Shift+F", "Fuzzy finder"),
         ("Ctrl+Shift+L", "File list view"),
         ("Ctrl+Shift+H", "Hide / show dotfiles"),
-        ("Ctrl+Shift+P", "Password mode (no key sounds)"),
+        ("Ctrl+Shift+P", "Password mode (no key sounds; also automatic on password prompts)"),
         ("Ctrl+Shift+F5", "Replay startup"),
     ];
     egui::Window::new(title("SHORTCUTS"))

@@ -41,6 +41,7 @@ struct App {
     show_procs: bool,
     procs_ui: dialogs::ProcUi,
     pass_mode: bool,
+    auto_pass: bool,
 }
 
 impl App {
@@ -80,6 +81,7 @@ impl App {
             show_procs: false,
             procs_ui: dialogs::ProcUi { key: 2, asc: false },
             pass_mode: false,
+            auto_pass: false,
         }
     }
 
@@ -230,7 +232,10 @@ impl eframe::App for App {
 
         // suoni dei tasti fisici (come nell'originale: keydown -> stdin, Invio rilasciato -> granted)
         let events: Vec<egui::Event> = ctx.input(|i| i.events.clone());
-        if term_visible && !modal_open && !self.pass_mode {
+        // prompt di password rilevato nel terminale attivo -> stessa modalità di Ctrl+Shift+P
+        self.auto_pass = self.terms.get(self.active).and_then(|t| t.as_ref()).map_or(false, |t| t.password_prompt());
+        let quiet = self.pass_mode || self.auto_pass;
+        if term_visible && !modal_open && !quiet {
             for e in &events {
                 match e {
                     egui::Event::Key { pressed: true, .. } => self.audio.play_feedback(audio::Snd::Stdin),
@@ -317,7 +322,7 @@ impl eframe::App for App {
         }
 
         // tasti fisici -> evidenzia sulla tastiera virtuale
-        for e in events.iter().filter(|_| !modal_open && !self.pass_mode) {
+        for e in events.iter().filter(|_| !modal_open && !quiet) {
             if let egui::Event::Text(tx) = e {
                 self.kb.flash_key(tx.to_uppercase(), now);
             }
@@ -445,7 +450,7 @@ impl eframe::App for App {
                     }
                     let ksounds: Vec<audio::Snd> = self.kb.sounds.drain(..).collect();
                     if term_visible && !modal_open {
-                        if !self.pass_mode {
+                        if !quiet {
                             for s in ksounds {
                                 self.audio.play_feedback(s);
                             }

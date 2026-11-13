@@ -20,7 +20,7 @@ Impostazioni (tema, tastiera, audio, orologio, ping, shell, ecc.) con **Ctrl+Shi
 | Ctrl+Shift+S / K | impostazioni / elenco scorciatoie |
 | Ctrl+Shift+F | fuzzy finder sulla cartella corrente |
 | Ctrl+Shift+L / H | vista a lista / file nascosti |
-| Ctrl+Shift+P | modalità password (niente suoni dei tasti) |
+| Ctrl+Shift+P | modalità password manuale (niente suoni né evidenziazione dei tasti); scatta da sola quando il terminale chiede una password (ssh, sudo, passphrase) |
 | Ctrl+Shift+F5 | rivede l'animazione iniziale |
 
 Il clic sui processi apre la tabella completa. La posizione sul globo usa una richiesta HTTP a ip-api.com (disattivabile nelle impostazioni).

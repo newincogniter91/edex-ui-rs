@@ -91,6 +91,25 @@ impl Terminal {
         if out.is_empty() { None } else { Some(out) }
     }
 
+    /// True se il cursore è subito dopo un prompt di password (ssh, sudo, passphrase...).
+    pub fn password_prompt(&self) -> bool {
+        let Ok(p) = self.parser.lock() else { return false };
+        let screen = p.screen();
+        let (row, col) = screen.cursor_position();
+        let mut line = String::new();
+        for c in 0..col {
+            if let Some(cell) = screen.cell(row, c) {
+                if !cell.is_wide_continuation() {
+                    let t = cell.contents();
+                    line.push_str(if t.is_empty() { " " } else { &t });
+                }
+            }
+        }
+        let l = line.trim_end().to_lowercase();
+        (l.ends_with(':') || l.ends_with('?'))
+            && ["password", "passphrase", "passcode"].iter().any(|k| l.contains(k))
+    }
+
     /// True se è arrivato output dall'ultima chiamata (per il suono stdout).
     pub fn take_output(&self) -> bool {
         self.out.swap(false, Ordering::Relaxed)
