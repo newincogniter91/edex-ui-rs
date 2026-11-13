@@ -1,4 +1,4 @@
-use crate::theme::{self, fg_a, px, text, BG, FG};
+use crate::theme::{self, fg_a, px, text, bg, fg};
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, Sense, Shape, Stroke, Vec2};
 
 /// Cornice del terminale con angoli tagliati (bl e tr) come l'augmented-ui originale.
@@ -37,9 +37,9 @@ pub fn tabs(ui: &mut egui::Ui, r: Rect, labels: &[String], active: usize, vh: f3
             Pos2::new(cx - hw + s, cy + hh),
         ];
         let is_active = i == active;
-        let fill = if is_active { FG } else { BG };
+        let fill = if is_active { fg() } else { bg() };
         p.add(Shape::convex_polygon(poly.clone(), fill, Stroke::new(px(vh, 0.18), fg_a(0.5))));
-        let col = if is_active { BG } else { FG };
+        let col = if is_active { bg() } else { fg() };
         let fam = "main";
         text(&p, cx, cy + vh * 0.15, Align2::CENTER_CENTER, &labels[i], vh * 1.7 * scale, col, fam);
     };
@@ -63,6 +63,6 @@ pub fn tabs(ui: &mut egui::Ui, r: Rect, labels: &[String], active: usize, vh: f3
         Stroke::new(px(vh, 0.18), fg_a(0.5)),
     );
     let _ = Color32::BLACK;
-    let _ = theme::FG;
+    let _ = theme::fg();
     clicked
 }

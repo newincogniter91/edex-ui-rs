@@ -1,6 +1,8 @@
-use crate::hw::Hw;
-use crate::theme::{self, fg_a, px, text, FG};
-use eframe::egui::{Align2, Color32, Painter, Pos2, Rect, Shape, Stroke, Vec2};
+use crate::hw::{Battery, Hw};
+use crate::net::Net;
+use crate::settings::Settings;
+use crate::theme::{self, fg_a, px, text, fg};
+use eframe::egui::{Align2, Painter, Pos2, Rect, Shape, Stroke, Vec2};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 use sysinfo::{Networks, System};
@@ -23,7 +25,7 @@ impl Fade {
 fn veil(p: &Painter, r: Rect, a: f32, vh: f32) {
     if a < 0.999 {
         let rr = Rect::from_min_max(Pos2::new(r.left() - vh * 0.6, r.top() - vh * 0.4), Pos2::new(r.right() + vh * 0.6, r.bottom()));
-        p.rect_filled(rr, 0.0, Color32::from_rgba_unmultiplied(5, 8, 13, ((1.0 - a.max(0.0)) * 255.0) as u8));
+        p.rect_filled(rr, 0.0, theme::bg_a(1.0 - a.max(0.0)));
     }
 }
 
@@ -44,10 +46,24 @@ pub struct SysPanels {
     pub globe_phase: f32,
     land: Vec<(f32, f32, f32)>, // sin(lat), cos(lat), lon
     hw: Hw,
+    net: Net,
+    battery: Option<Battery>,
+    last_bat: Instant,
+    pub clock_hours: u8,
+}
+
+/// Riga della tabella dei processi (finestra "Active Processes").
+pub struct ProcRow {
+    pub pid: u32,
+    pub name: String,
+    pub cpu: f32,
+    pub mem: u64,
+    pub status: String,
+    pub runtime: u64,
 }
 
 impl SysPanels {
-    pub fn new() -> Self {
+    pub fn new(st: &Settings) -> Self {
         let mut sys = System::new();
         sys.refresh_cpu_usage();
         sys.refresh_memory();
@@ -70,7 +86,39 @@ impl SysPanels {
             globe_phase: 0.0,
             land: load_land(),
             hw: crate::hw::spawn(),
+            net: crate::net::spawn(st.ping_addr.clone(), st.geoip),
+            battery: crate::hw::battery(),
+            last_bat: Instant::now(),
+            clock_hours: st.clock_hours,
         }
+    }
+
+    /// Applica le impostazioni cambiate a caldo.
+    pub fn apply_settings(&mut self, st: &Settings) {
+        self.clock_hours = st.clock_hours;
+        if let Ok(mut n) = self.net.lock() {
+            if n.addr != st.ping_addr {
+                n.addr = st.ping_addr.clone();
+            }
+            n.geo_on = st.geoip;
+        }
+    }
+
+    /// Tutti i processi (per la finestra dei processi).
+    pub fn process_rows(&self) -> Vec<ProcRow> {
+        let ncpu = self.sys.cpus().len().max(1) as f32;
+        self.sys
+            .processes()
+            .iter()
+            .map(|(pid, p)| ProcRow {
+                pid: pid.as_u32(),
+                name: p.name().to_string(),
+                cpu: p.cpu_usage() / ncpu,
+                mem: p.memory(),
+                status: format!("{:?}", p.status()),
+                runtime: p.run_time(),
+            })
+            .collect()
     }
 
     /// Aggiorna le metriche al massimo una volta al secondo.
@@ -78,6 +126,10 @@ impl SysPanels {
         let dt = self.last_refresh.elapsed();
         if dt < Duration::from_millis(1000) {
             return;
+        }
+        if self.last_bat.elapsed() > Duration::from_secs(5) {
+            self.battery = crate::hw::battery();
+            self.last_bat = Instant::now();
         }
         let secs = dt.as_secs_f32().max(0.1);
         self.last_refresh = Instant::now();
@@ -129,7 +181,7 @@ impl SysPanels {
 
     // ------------------------------------------------------------ colonne
 
-    pub fn left_column(&self, p: &Painter, col: Rect, vh: f32, fa: &Fade) {
+    pub fn left_column(&self, p: &Painter, col: Rect, vh: f32, fa: &Fade) -> Rect {
         let inner = col.shrink2(Vec2::new(vh * 1.39, 0.0));
         theme::title_bar(p, Rect::from_min_size(Pos2::new(inner.left(), col.top() + vh * 0.2), Vec2::new(inner.width(), vh * 1.6)), "PANEL", "SYSTEM", vh);
         veil(p, Rect::from_min_size(Pos2::new(inner.left(), col.top() + vh * 0.2), Vec2::new(inner.width(), vh * 1.6)), fa.title, vh);
@@ -147,6 +199,7 @@ impl SysPanels {
         veil(p, rects[4], fa.left[4], vh);
         self.toplist(p, rects[5], vh);
         veil(p, rects[5], fa.left[5], vh);
+        rects[5]
     }
 
     pub fn right_column(&self, p: &Painter, col: Rect, vh: f32, fa: &Fade) {
@@ -169,14 +222,21 @@ impl SysPanels {
     fn clock(&self, p: &Painter, r: Rect, vh: f32) {
         theme::module_frame(p, r, vh);
         let now = chrono::Local::now();
-        let s = now.format("%H:%M:%S").to_string();
+        let twelve = self.clock_hours == 12;
+        let mut s = now.format(if twelve { "%I:%M:%S" } else { "%H:%M:%S" }).to_string();
+        if twelve && s.starts_with('0') {
+            s.remove(0);
+        }
+        if twelve {
+            theme::text(p, r.right() - vh * 0.3, r.bottom() - vh * 1.2, Align2::RIGHT_CENTER, now.format("%p"), vh * 1.3, fg_a(0.8), "main");
+        }
         // ogni carattere in una cella fissa, come nell'originale
         let cell = vh * 2.5;
         let total = cell * s.chars().count() as f32 * 0.92;
         let mut x = r.center().x - total / 2.0 + cell * 0.46;
         for ch in s.chars() {
             let w = if ch == ':' { cell * 0.7 } else { cell };
-            theme::text(p, x + w / 2.0, r.center().y + vh * 0.3, Align2::CENTER_CENTER, ch, vh * 4.0, FG, "light");
+            theme::text(p, x + w / 2.0, r.center().y + vh * 0.3, Align2::CENTER_CENTER, ch, vh * 4.0, fg(), "light");
             x += w;
         }
     }
@@ -186,11 +246,17 @@ impl SysPanels {
         let now = chrono::Local::now();
         let up = System::uptime();
         let uptime = format!("{}:{:02}:{:02}", up / 3600, (up / 60) % 60, up % 60);
+        let power = match &self.battery {
+            None => "ON".to_string(),
+            Some(b) if b.charging => "CHARGE".to_string(),
+            Some(b) if b.ac => "WIRED".to_string(),
+            Some(b) => format!("{}%", b.percent),
+        };
         let cols: [(String, String); 4] = [
             (now.format("%Y").to_string(), now.format("%b %-d").to_string().to_uppercase()),
             ("UPTIME".into(), uptime),
             ("TYPE".into(), std::env::consts::OS.to_string()),
-            ("POWER".into(), "WIRED".into()),
+            ("POWER".into(), power),
         ];
         cells(p, r, &cols, vh, 1.111);
     }
@@ -263,7 +329,7 @@ impl SysPanels {
         for i in 0..n {
             let (cx, cy) = (i % cols, i / cols);
             let col = if i < active {
-                FG
+                fg()
             } else if i >= n - free_n.min(n) {
                 fg_a(0.18)
             } else {
@@ -276,12 +342,12 @@ impl SysPanels {
         // swap
         let (st, su) = (self.sys.total_swap() as f64, self.sys.used_swap() as f64);
         let y = area.bottom() + vh * 1.0;
-        text(p, r.left(), y, Align2::LEFT_CENTER, "SWAP", vh * 1.3, FG, "main");
-        text(p, r.right(), y, Align2::RIGHT_CENTER, format!("{:.1} GB", su / gb), vh * 1.3, FG, "main");
+        text(p, r.left(), y, Align2::LEFT_CENTER, "SWAP", vh * 1.3, fg(), "main");
+        text(p, r.right(), y, Align2::RIGHT_CENTER, format!("{:.1} GB", su / gb), vh * 1.3, fg(), "main");
         let bar = Rect::from_min_size(Pos2::new(r.left(), y + vh * 1.1), Vec2::new(r.width(), vh * 0.4));
         p.rect_filled(Rect::from_min_size(bar.left_center() - Vec2::new(0.0, vh * 0.125), Vec2::new(bar.width(), vh * 0.25)), 0.0, fg_a(0.25));
         let frac = if st > 0.0 { (su / st) as f32 } else { 0.0 };
-        p.rect_filled(Rect::from_min_size(bar.left_top(), Vec2::new(bar.width() * frac, vh * 0.4)), 0.0, FG);
+        p.rect_filled(Rect::from_min_size(bar.left_top(), Vec2::new(bar.width() * frac, vh * 0.4)), 0.0, fg());
     }
 
     fn toplist(&self, p: &Painter, r: Rect, vh: f32) {
@@ -290,10 +356,10 @@ impl SysPanels {
         let mut y = r.top() + vh * 3.4;
         for (pid, name, cpu, mem) in &self.top {
             let sz = vh * 1.5;
-            text(p, r.left(), y, Align2::LEFT_CENTER, pid, sz, FG, "main");
-            text(p, r.left() + r.width() * 0.2, y, Align2::LEFT_CENTER, short(name, 13), sz, FG, "main");
-            text(p, r.left() + r.width() * 0.76, y, Align2::RIGHT_CENTER, format!("{cpu:.0}%"), sz, FG, "main");
-            text(p, r.right(), y, Align2::RIGHT_CENTER, format!("{mem:.0}%"), sz, FG, "main");
+            text(p, r.left(), y, Align2::LEFT_CENTER, pid, sz, fg(), "main");
+            text(p, r.left() + r.width() * 0.2, y, Align2::LEFT_CENTER, short(name, 13), sz, fg(), "main");
+            text(p, r.left() + r.width() * 0.76, y, Align2::RIGHT_CENTER, format!("{cpu:.0}%"), sz, fg(), "main");
+            text(p, r.right(), y, Align2::RIGHT_CENTER, format!("{mem:.0}%"), sz, fg(), "main");
             y += vh * 1.75;
         }
     }
@@ -303,11 +369,11 @@ impl SysPanels {
     fn netstat(&self, p: &Painter, r: Rect, vh: f32) {
         theme::module_frame(p, r, vh);
         header(p, r, "NETWORK STATUS", &format!("INTERFACE: {}", short(&self.iface, 16)), vh);
-        let state = if self.nets.iter().next().is_some() { "ONLINE" } else { "OFFLINE" };
+        let ni = self.net.lock().map(|g| g.clone()).unwrap_or_default();
         let cols: [(String, String); 3] = [
-            ("STATE".into(), state.into()),
-            ("DOWN".into(), format!("{}/s", bytes(self.rx_rate))),
-            ("UP".into(), format!("{}/s", bytes(self.tx_rate))),
+            ("STATE".into(), if ni.online { "ONLINE" } else { "OFFLINE" }.into()),
+            ("IP".into(), ni.ip.clone()),
+            ("PING".into(), ni.ping_ms.map(|m| format!("{m:.0} ms")).unwrap_or_else(|| "--".into())),
         ];
         let row = Rect::from_min_max(Pos2::new(r.left(), r.top() + vh * 3.0), r.right_bottom());
         cells(p, row, &cols, vh, 1.3);
@@ -315,7 +381,12 @@ impl SysPanels {
 
     fn globe(&self, p: &Painter, r: Rect, vh: f32) {
         theme::module_frame(p, r, vh);
-        header(p, r, "WORLD VIEW", "ENDPOINT LAT/LON: 0.0, 0.0", vh);
+        let geo = self.net.lock().ok().and_then(|g| g.geo);
+        let sub = match geo {
+            Some((la, lo)) => format!("ENDPOINT LAT/LON: {la:.2}, {lo:.2}"),
+            None => "ENDPOINT LAT/LON: --, --".to_string(),
+        };
+        header(p, r, "WORLD VIEW", &sub, vh);
         let area = Rect::from_min_max(Pos2::new(r.left(), r.top() + vh * 2.6), r.right_bottom());
         let rad = (area.width().min(area.height()) * 0.47).max(10.0);
         let c = area.center();
@@ -336,6 +407,19 @@ impl SysPanels {
                 );
             }
         }
+        // segnaposto sulla posizione reale (se nota)
+        if let Some((la, lo)) = geo {
+            let (la, l) = (la.to_radians() as f32, lo.to_radians() as f32 + ph);
+            let (x, y, z) = (la.cos() * l.sin(), la.sin(), la.cos() * l.cos());
+            let (y2, z2) = (y * ct - z * st, y * st + z * ct);
+            if z2 > 0.0 {
+                let base = Pos2::new(c.x + x * rad, c.y - y2 * rad);
+                let tip = Pos2::new(c.x + x * rad * 1.12, c.y - y2 * rad * 1.12);
+                p.line_segment([base, tip], Stroke::new(px(vh, 0.14), fg()));
+                p.circle_filled(tip, px(vh, 0.45), fg());
+                p.circle_stroke(tip, px(vh, 0.9), Stroke::new(px(vh, 0.1), fg_a(0.6)));
+            }
+        }
         p.circle_stroke(c, rad, Stroke::new(px(vh, 0.1), fg_a(0.25)));
     }
 
@@ -351,7 +435,7 @@ impl SysPanels {
         line_chart(p, top, &self.tx_hist, mx(&self.tx_hist), 1.0, vh);
         line_chart(p, bot, &self.rx_hist, mx(&self.rx_hist), 1.0, vh);
         let tot = bytes(self.rx_total + self.tx_total);
-        text(p, r.center().x, r.bottom() - vh * 1.1, Align2::CENTER_CENTER, format!("TOTAL {tot}"), vh * 1.8, FG, "main");
+        text(p, r.center().x, r.bottom() - vh * 1.1, Align2::CENTER_CENTER, format!("TOTAL {tot}"), vh * 1.8, fg(), "main");
     }
 }
 
@@ -393,7 +477,7 @@ fn distribute(inner: Rect, top: f32, bottom: f32, heights: &[f32], vh: f32) -> V
 
 fn header(p: &Painter, r: Rect, title: &str, sub: &str, vh: f32) {
     let y = r.top() + vh * 1.5;
-    text(p, r.left(), y, Align2::LEFT_CENTER, title, vh * 1.48, FG, "main");
+    text(p, r.left(), y, Align2::LEFT_CENTER, title, vh * 1.48, fg(), "main");
     text(p, r.right(), y, Align2::RIGHT_CENTER, sub, vh * 1.2, fg_a(0.8), "main");
 }
 
@@ -401,7 +485,7 @@ fn cells(p: &Painter, r: Rect, cols: &[(String, String)], vh: f32, size: f32) {
     let w = r.width() / cols.len() as f32;
     for (i, (k, v)) in cols.iter().enumerate() {
         let cx = r.left() + w * (i as f32 + 0.5);
-        text(p, cx, r.top() + r.height() * 0.32 + vh * 0.2, Align2::CENTER_CENTER, short(k, 12), vh * size, FG, "main");
+        text(p, cx, r.top() + r.height() * 0.32 + vh * 0.2, Align2::CENTER_CENTER, short(k, 12), vh * size, fg(), "main");
         text(p, cx, r.top() + r.height() * 0.68 + vh * 0.2, Align2::CENTER_CENTER, short(v, 12), vh * size * 0.92, fg_a(0.75), "main");
     }
 }

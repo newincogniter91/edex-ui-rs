@@ -68,3 +68,55 @@ fn query() -> [String; 3] {
     let ch = rd("chassis_type").parse::<u32>().map(chassis_name).unwrap_or("--");
     [rd("sys_vendor"), rd("product_name"), ch.to_string()]
 }
+
+/// Stato della batteria (None se il PC non ne ha una).
+pub struct Battery {
+    pub percent: u8,
+    pub charging: bool,
+    pub ac: bool,
+}
+
+#[cfg(windows)]
+pub fn battery() -> Option<Battery> {
+    #[repr(C)]
+    struct Sps {
+        ac: u8,
+        flag: u8,
+        pct: u8,
+        sys: u8,
+        life: u32,
+        full: u32,
+    }
+    extern "system" {
+        fn GetSystemPowerStatus(p: *mut Sps) -> i32;
+    }
+    let mut s = Sps { ac: 0, flag: 0, pct: 0, sys: 0, life: 0, full: 0 };
+    if unsafe { GetSystemPowerStatus(&mut s) } == 0 || s.flag == 128 || s.flag == 255 {
+        return None;
+    }
+    Some(Battery { percent: if s.pct == 255 { 0 } else { s.pct }, charging: s.flag & 8 != 0, ac: s.ac == 1 })
+}
+
+#[cfg(not(windows))]
+pub fn battery() -> Option<Battery> {
+    let rd = std::fs::read_dir("/sys/class/power_supply").ok()?;
+    let mut bat: Option<Battery> = None;
+    let mut ac = false;
+    for e in rd.flatten() {
+        let p = e.path();
+        let ty = std::fs::read_to_string(p.join("type")).unwrap_or_default();
+        match ty.trim() {
+            "Battery" => {
+                let pct = std::fs::read_to_string(p.join("capacity")).ok().and_then(|s| s.trim().parse::<u8>().ok()).unwrap_or(0);
+                let st = std::fs::read_to_string(p.join("status")).unwrap_or_default();
+                bat = Some(Battery { percent: pct, charging: st.trim() == "Charging", ac: false });
+            }
+            "Mains" => ac = std::fs::read_to_string(p.join("online")).map(|s| s.trim() == "1").unwrap_or(false),
+            _ => {}
+        }
+    }
+    bat.map(|mut b| {
+        b.ac = ac;
+        b
+    })
+}

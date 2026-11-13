@@ -18,13 +18,16 @@ pub enum Snd {
 pub struct Audio {
     _stream: Option<OutputStream>,
     handle: Option<OutputStreamHandle>,
+    pub enabled: bool,
+    pub volume: f32,
+    pub feedback: bool,
 }
 
 impl Audio {
     pub fn new() -> Self {
         match OutputStream::try_default() {
-            Ok((s, h)) => Self { _stream: Some(s), handle: Some(h) },
-            Err(_) => Self { _stream: None, handle: None },
+            Ok((s, h)) => Self { _stream: Some(s), handle: Some(h), enabled: true, volume: 1.0, feedback: true },
+            Err(_) => Self { _stream: None, handle: None, enabled: true, volume: 1.0, feedback: true },
         }
     }
 
@@ -42,11 +45,21 @@ impl Audio {
         }
     }
 
+    /// Suoni di feedback (tasti, output del terminale): si possono disattivare a parte.
+    pub fn play_feedback(&self, s: Snd) {
+        if self.feedback {
+            self.play(s);
+        }
+    }
+
     pub fn play(&self, s: Snd) {
+        if !self.enabled {
+            return;
+        }
         let Some(h) = &self.handle else { return };
         let (bytes, vol) = Self::data(s);
         if let Ok(dec) = Decoder::new(Cursor::new(bytes)) {
-            let _ = h.play_raw(dec.convert_samples::<f32>().amplify(vol));
+            let _ = h.play_raw(dec.convert_samples::<f32>().amplify(vol * self.volume));
         }
     }
 }

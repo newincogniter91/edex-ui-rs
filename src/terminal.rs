@@ -1,3 +1,4 @@
+use crate::settings::Settings;
 use crate::theme;
 use eframe::egui::{self, Color32, EventFilter, FontId, Key, Pos2, Rect, Sense, Vec2};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -14,16 +15,17 @@ pub struct Terminal {
     scroll: usize,
     out: Arc<AtomicBool>,
     child: Box<dyn Child + Send + Sync>,
+    sel: Option<((u16, u16), (u16, u16))>,
 }
 
 impl Terminal {
-    pub fn new(ctx: &egui::Context) -> std::io::Result<Self> {
+    pub fn new(ctx: &egui::Context, st: &Settings) -> std::io::Result<Self> {
         let (cols, rows) = (100u16, 30u16);
         let pair = native_pty_system()
             .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
-        let cmd = default_shell();
+        let cmd = default_shell(st);
         let child = pair
             .slave
             .spawn_command(cmd)
@@ -60,7 +62,33 @@ impl Terminal {
             }
         });
 
-        Ok(Self { parser, writer, master: pair.master, cols, rows, scroll: 0, out, child })
+        Ok(Self { parser, writer, master: pair.master, cols, rows, scroll: 0, out, child, sel: None })
+    }
+
+    /// Testo della selezione corrente (per Ctrl+Shift+C).
+    pub fn selection_text(&self) -> Option<String> {
+        let (a, b) = self.sel.map(|(a, b)| if a <= b { (a, b) } else { (b, a) })?;
+        let p = self.parser.lock().ok()?;
+        let screen = p.screen();
+        let mut out = String::new();
+        for r in a.0..=b.0 {
+            let c0 = if r == a.0 { a.1 } else { 0 };
+            let c1 = if r == b.0 { b.1 } else { self.cols.saturating_sub(1) };
+            let mut line = String::new();
+            for c in c0..=c1 {
+                if let Some(cell) = screen.cell(r, c) {
+                    if !cell.is_wide_continuation() {
+                        let t = cell.contents();
+                        line.push_str(if t.is_empty() { " " } else { &t });
+                    }
+                }
+            }
+            out.push_str(line.trim_end());
+            if r != b.0 {
+                out.push('\n');
+            }
+        }
+        if out.is_empty() { None } else { Some(out) }
     }
 
     /// True se è arrivato output dall'ultima chiamata (per il suono stdout).
@@ -91,6 +119,7 @@ impl Terminal {
     }
 
     pub fn send(&mut self, s: &str) {
+        self.sel = None;
         let _ = self.writer.write_all(s.as_bytes());
         let _ = self.writer.flush();
     }
@@ -107,13 +136,15 @@ impl Terminal {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, rect: Rect, id: egui::Id, size: f32) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, rect: Rect, id: egui::Id, size: f32, show_cursor: bool, input: bool) {
         let font = theme::font(size, "mono");
         let (cw, rh) = ui.fonts(|f| (f.glyph_width(&font, 'M'), f.row_height(&font)));
-        let resp = ui.interact(rect, id, Sense::click());
+        let resp = ui.interact(rect, id, Sense::click_and_drag());
 
         // il terminale tiene sempre il focus e cattura Tab/Esc/frecce
-        resp.request_focus();
+        if input {
+            resp.request_focus();
+        }
         if resp.secondary_clicked() {
             self.paste_clipboard();
         }
@@ -133,10 +164,36 @@ impl Terminal {
         let rows = (rect.height() / rh).floor() as u16;
         self.resize(cols, rows);
 
-        self.handle_input(ui);
+        // selezione con il mouse (trascinando); Ctrl+Shift+C copia
+        {
+            let (cols_f, rows_f) = (self.cols as f32, self.rows as f32);
+            let cell_at = |pos: Pos2| -> (u16, u16) {
+                (
+                    ((pos.y - rect.top()) / rh).floor().clamp(0.0, rows_f - 1.0) as u16,
+                    ((pos.x - rect.left()) / cw).floor().clamp(0.0, cols_f - 1.0) as u16,
+                )
+            };
+            if resp.drag_started_by(egui::PointerButton::Primary) {
+                if let Some(p) = resp.interact_pointer_pos() {
+                    let c = cell_at(p);
+                    self.sel = Some((c, c));
+                }
+            } else if resp.dragged_by(egui::PointerButton::Primary) {
+                if let (Some(p), Some((a, _))) = (resp.interact_pointer_pos(), self.sel) {
+                    self.sel = Some((a, cell_at(p)));
+                }
+            }
+            if resp.clicked_by(egui::PointerButton::Primary) {
+                self.sel = None;
+            }
+        }
+
+        if input {
+            self.handle_input(ui);
+        }
 
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0.0, theme::BG);
+        painter.rect_filled(rect, 0.0, theme::term_bg());
 
         let mut parser = match self.parser.lock() {
             Ok(p) => p,
@@ -147,12 +204,13 @@ impl Terminal {
         // se lo scrollback è più corto del richiesto, riallinea
         self.scroll = screen.scrollback();
         let origin = rect.min;
+        let sel = self.sel.map(|(a, b)| if a <= b { (a, b) } else { (b, a) });
 
         for r in 0..self.rows {
             let y = origin.y + r as f32 * rh;
             let mut run = String::new();
             let mut run_col = 0u16;
-            let mut run_fg = theme::FG;
+            let mut run_fg = theme::term_fg();
             let mut run_bold = false;
 
             for c in 0..self.cols {
@@ -160,12 +218,21 @@ impl Terminal {
                     Some(cell) => cell,
                     None => continue,
                 };
+                if let Some((a, b)) = sel {
+                    if (r, c) >= a && (r, c) <= b {
+                        painter.rect_filled(
+                            Rect::from_min_size(Pos2::new(origin.x + c as f32 * cw, y), Vec2::new(cw, rh)),
+                            0.0,
+                            theme::fg_a(0.3),
+                        );
+                    }
+                }
                 let mut fg = color_of(cell.fgcolor(), true);
                 let mut bg = color_of(cell.bgcolor(), false);
                 if cell.inverse() {
                     std::mem::swap(&mut fg, &mut bg);
                 }
-                if bg != theme::BG {
+                if bg != theme::term_bg() {
                     let x = origin.x + c as f32 * cw;
                     let w = if cell.is_wide() { cw * 2.0 } else { cw };
                     painter.rect_filled(
@@ -202,13 +269,13 @@ impl Terminal {
         }
 
         // cursore a blocco
-        if self.scroll == 0 && !screen.hide_cursor() {
+        if show_cursor && self.scroll == 0 && !screen.hide_cursor() {
             let (cr, cc) = screen.cursor_position();
             let cur = Rect::from_min_size(
                 Pos2::new(origin.x + cc as f32 * cw, origin.y + cr as f32 * rh),
                 Vec2::new(cw, rh),
             );
-            painter.rect_filled(cur, 0.0, theme::FG.gamma_multiply(0.75));
+            painter.rect_filled(cur, 0.0, theme::cursor().gamma_multiply(0.75));
         }
     }
 
@@ -237,7 +304,15 @@ impl Terminal {
                     self.scroll = 0;
                     self.send(&t);
                 }
-                egui::Event::Copy => self.send("\x03"),
+                egui::Event::Copy => {
+                    if ui.input(|i| i.modifiers.shift) {
+                        if let Some(t) = self.selection_text() {
+                            ui.ctx().copy_text(t);
+                        }
+                    } else {
+                        self.send("\x03");
+                    }
+                }
                 egui::Event::Cut => self.send("\x18"),
                 egui::Event::Key { key, pressed: true, modifiers, .. } => {
                     let arrow = |app: bool, c: char| {
@@ -326,9 +401,9 @@ fn color_of(c: vt100::Color, is_fg: bool) -> Color32 {
     match c {
         vt100::Color::Default => {
             if is_fg {
-                theme::FG
+                theme::term_fg()
             } else {
-                theme::BG
+                theme::term_bg()
             }
         }
         vt100::Color::Idx(i) => theme::indexed(i),
@@ -336,24 +411,27 @@ fn color_of(c: vt100::Color, is_fg: bool) -> Color32 {
     }
 }
 
-fn default_shell() -> CommandBuilder {
-    #[cfg(windows)]
-    {
-        let mut cmd = CommandBuilder::new("powershell.exe");
-        cmd.arg("-NoLogo");
-        if let Some(home) = std::env::var_os("USERPROFILE") {
-            cmd.cwd(home);
-        }
-        cmd
+fn default_shell(st: &Settings) -> CommandBuilder {
+    let prog = if st.shell.trim().is_empty() {
+        if cfg!(windows) { "powershell.exe".to_string() } else { std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()) }
+    } else {
+        st.shell.trim().to_string()
+    };
+    let mut cmd = CommandBuilder::new(&prog);
+    let args = if st.shell_args.trim().is_empty() {
+        if cfg!(windows) && prog.to_lowercase().contains("powershell") { "-NoLogo".to_string() } else { String::new() }
+    } else {
+        st.shell_args.clone()
+    };
+    for a in args.split_whitespace() {
+        cmd.arg(a);
     }
-    #[cfg(not(windows))]
-    {
-        let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        let mut cmd = CommandBuilder::new(sh);
-        cmd.env("TERM", "xterm-256color");
-        if let Some(home) = std::env::var_os("HOME") {
-            cmd.cwd(home);
-        }
-        cmd
+    cmd.env("TERM", "xterm-256color");
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
+    if !st.cwd.trim().is_empty() && std::path::Path::new(st.cwd.trim()).is_dir() {
+        cmd.cwd(st.cwd.trim());
+    } else if let Some(h) = home {
+        cmd.cwd(h);
     }
+    cmd
 }

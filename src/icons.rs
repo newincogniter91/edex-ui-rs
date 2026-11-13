@@ -97,7 +97,7 @@ impl Icons {
         if !self.textures.contains_key(&i) {
             let n = self.size * self.size;
             let data = self.alpha.get(i * n..(i + 1) * n)?;
-            let pixels: Vec<Color32> = data.iter().map(|a| Color32::from_rgba_unmultiplied(170, 207, 209, *a)).collect();
+            let pixels: Vec<Color32> = data.iter().map(|a| Color32::from_rgba_unmultiplied(255, 255, 255, *a)).collect();
             let img = ColorImage { size: [self.size, self.size], pixels };
             let t = ctx.load_texture(format!("icon{i}"), img, TextureOptions::LINEAR);
             self.textures.insert(i, t);

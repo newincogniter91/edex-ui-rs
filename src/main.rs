@@ -2,16 +2,21 @@
 
 mod audio;
 mod boot;
+mod data;
+mod dialogs;
 mod fsdisp;
 mod hw;
 mod icons;
+mod net;
 mod keyboard;
+mod settings;
 mod modules;
 mod shell;
 mod terminal;
 mod theme;
 
-use eframe::egui::{self, Align2, Color32, FontData, FontDefinitions, FontFamily, Pos2, Rect, Stroke, Vec2};
+use eframe::egui::{self, Align2, FontData, FontDefinitions, FontFamily, Key, Modifiers, Pos2, Rect, Sense, Stroke, Vec2};
+use settings::Settings;
 use std::time::Duration;
 use terminal::Terminal;
 
@@ -27,27 +32,80 @@ struct App {
     fs_started: bool,
     last_stdout: f64,
     user: String,
+    settings: Settings,
+    prev: Settings,
+    show_settings: bool,
+    show_shortcuts: bool,
+    show_fuzzy: bool,
+    fuzzy: dialogs::Fuzzy,
+    show_procs: bool,
+    procs_ui: dialogs::ProcUi,
+    pass_mode: bool,
 }
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let settings = Settings::load();
+        settings::apply_theme(&settings.theme);
         setup_fonts(&cc.egui_ctx);
         apply_style(&cc.egui_ctx);
         let mut terms: Vec<Option<Terminal>> = (0..5).map(|_| None).collect();
-        terms[0] = Terminal::new(&cc.egui_ctx).ok();
+        terms[0] = Terminal::new(&cc.egui_ctx, &settings).ok();
         let user = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default();
+        let mut fs = fsdisp::FsDisp::new();
+        fs.hide_dotfiles = settings.hide_dotfiles;
+        fs.list_view = settings.fs_list_view;
+        let mut audio = audio::Audio::new();
+        audio.enabled = settings.audio;
+        audio.volume = settings.audio_volume;
+        audio.feedback = !settings.disable_feedback_audio;
         Self {
             terms,
             active: 0,
-            sys: modules::SysPanels::new(),
-            fs: fsdisp::FsDisp::new(),
-            kb: keyboard::Keyboard::new("en-US"),
-            audio: audio::Audio::new(),
-            tl: boot::Timeline::new(),
+            sys: modules::SysPanels::new(&settings),
+            fs,
+            kb: keyboard::Keyboard::new(&settings.keyboard),
+            audio,
+            tl: if settings.nointro { boot::Timeline::skipped() } else { boot::Timeline::new() },
             t0: None,
             fs_started: false,
             last_stdout: 0.0,
             user,
+            prev: settings.clone(),
+            settings,
+            show_settings: false,
+            show_shortcuts: false,
+            show_fuzzy: false,
+            fuzzy: dialogs::Fuzzy::new(),
+            show_procs: false,
+            procs_ui: dialogs::ProcUi { key: 2, asc: false },
+            pass_mode: false,
+        }
+    }
+
+    fn switch_tab(&mut self, ctx: &egui::Context, i: usize) {
+        if i >= self.terms.len() {
+            return;
+        }
+        self.audio.play(audio::Snd::Folder);
+        if self.terms[i].is_none() {
+            self.terms[i] = Terminal::new(ctx, &self.settings).ok();
+        }
+        if self.terms[i].is_some() {
+            self.active = i;
+        }
+    }
+
+    fn cycle_tab(&mut self, step: isize) {
+        let n = self.terms.len() as isize;
+        let mut i = self.active as isize;
+        for _ in 0..n {
+            i = (i + step).rem_euclid(n);
+            if self.terms[i as usize].is_some() {
+                self.active = i as usize;
+                self.audio.play(audio::Snd::Folder);
+                return;
+            }
         }
     }
 }
@@ -93,13 +151,31 @@ fn setup_fonts(ctx: &egui::Context) {
 
 fn apply_style(ctx: &egui::Context) {
     let mut v = egui::Visuals::dark();
-    v.override_text_color = Some(theme::FG);
-    v.panel_fill = theme::BG;
-    v.window_fill = theme::BG;
-    v.extreme_bg_color = theme::BG;
+    v.override_text_color = Some(theme::fg());
+    v.panel_fill = theme::bg();
+    v.window_fill = theme::bg();
+    v.extreme_bg_color = theme::bg();
     v.selection.bg_fill = theme::fg_a(0.3);
-    v.selection.stroke = Stroke::new(1.0_f32, theme::FG);
-    v.widgets.hovered.bg_fill = theme::GREY;
+    v.selection.stroke = Stroke::new(1.0_f32, theme::fg());
+    v.widgets.hovered.bg_fill = theme::grey();
+    v.widgets.hovered.weak_bg_fill = theme::grey();
+    v.widgets.inactive.bg_fill = theme::grey();
+    v.widgets.inactive.weak_bg_fill = theme::grey();
+    v.widgets.active.bg_fill = theme::grey();
+    v.widgets.active.weak_bg_fill = theme::grey();
+    v.widgets.open.bg_fill = theme::grey();
+    v.widgets.open.weak_bg_fill = theme::grey();
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, theme::fg_a(0.3));
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, theme::fg());
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, theme::fg());
+    v.widgets.active.fg_stroke = Stroke::new(1.0_f32, theme::fg());
+    v.window_stroke = Stroke::new(1.5_f32, theme::fg());
+    v.window_rounding = 0.0.into();
+    v.widgets.noninteractive.rounding = 0.0.into();
+    v.widgets.inactive.rounding = 0.0.into();
+    v.widgets.hovered.rounding = 0.0.into();
+    v.widgets.active.rounding = 0.0.into();
+    v.widgets.open.rounding = 0.0.into();
     ctx.set_visuals(v);
     ctx.style_mut(|s| {
         s.spacing.scroll = egui::style::ScrollStyle::solid();
@@ -109,13 +185,33 @@ fn apply_style(ctx: &egui::Context) {
 
 impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        Color32::from_rgb(5, 8, 13).to_normalized_gamma_f32()
+        theme::bg().to_normalized_gamma_f32()
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.sys.refresh();
         let now = ctx.input(|i| i.time);
-        let t0 = *self.t0.get_or_insert(now);
+        let skip = self.settings.nointro;
+        let t0 = *self.t0.get_or_insert(now - if skip { 100.0 } else { 0.0 });
+
+        // impostazioni cambiate: applica a caldo e salva
+        if self.settings != self.prev {
+            if self.settings.theme != self.prev.theme {
+                settings::apply_theme(&self.settings.theme);
+                apply_style(ctx);
+            }
+            if self.settings.keyboard != self.prev.keyboard {
+                self.kb = keyboard::Keyboard::new(&self.settings.keyboard);
+            }
+            self.audio.enabled = self.settings.audio;
+            self.audio.volume = self.settings.audio_volume;
+            self.audio.feedback = !self.settings.disable_feedback_audio;
+            self.sys.apply_settings(&self.settings);
+            self.fs.hide_dotfiles = self.settings.hide_dotfiles;
+            self.fs.list_view = self.settings.fs_list_view;
+            self.settings.save();
+            self.prev = self.settings.clone();
+        }
         let t = now - t0;
 
         for s in self.tl.poll(t) {
@@ -125,6 +221,7 @@ impl eframe::App for App {
         let booting = ui_t < 0.0;
         let intro_done = ui_t >= boot::INTRO_LEN;
         let term_visible = ui_t >= 3.18;
+        let modal_open = self.show_settings || self.show_shortcuts || self.show_fuzzy || self.show_procs;
 
         self.sys.globe_phase = (now as f32 * 0.35) % std::f32::consts::TAU;
         // durante l'avvio si ridisegna fluido; poi ~10 fps (il globo gira piano)
@@ -133,11 +230,11 @@ impl eframe::App for App {
 
         // suoni dei tasti fisici (come nell'originale: keydown -> stdin, Invio rilasciato -> granted)
         let events: Vec<egui::Event> = ctx.input(|i| i.events.clone());
-        if term_visible {
+        if term_visible && !modal_open && !self.pass_mode {
             for e in &events {
                 match e {
-                    egui::Event::Key { pressed: true, .. } => self.audio.play(audio::Snd::Stdin),
-                    egui::Event::Key { key: egui::Key::Enter, pressed: false, .. } => self.audio.play(audio::Snd::Granted),
+                    egui::Event::Key { pressed: true, .. } => self.audio.play_feedback(audio::Snd::Stdin),
+                    egui::Event::Key { key: egui::Key::Enter, pressed: false, .. } => self.audio.play_feedback(audio::Snd::Granted),
                     _ => {}
                 }
             }
@@ -147,7 +244,7 @@ impl eframe::App for App {
                 got |= tm.take_output();
             }
             if got && now - self.last_stdout > 0.03 {
-                self.audio.play(audio::Snd::Stdout);
+                self.audio.play_feedback(audio::Snd::Stdout);
                 self.last_stdout = now;
             }
         }
@@ -168,15 +265,66 @@ impl eframe::App for App {
             }
         }
 
+        // scorciatoie come nell'originale (consumano i tasti, così non arrivano al terminale)
+        if term_visible {
+            let cs = Modifiers { ctrl: true, shift: true, ..Default::default() };
+            let mut acts: Vec<&'static str> = Vec::new();
+            ctx.input_mut(|i| {
+                for (k, a) in [
+                    (Key::S, "SETTINGS"),
+                    (Key::K, "SHORTCUTS"),
+                    (Key::F, "FUZZY"),
+                    (Key::L, "FSLIST"),
+                    (Key::H, "FSDOT"),
+                    (Key::P, "PASS"),
+                    (Key::F5, "RELOAD"),
+                    (Key::Tab, "PREV"),
+                ] {
+                    if i.consume_key(cs, k) {
+                        acts.push(a);
+                    }
+                }
+                if i.consume_key(Modifiers::CTRL, Key::Tab) {
+                    acts.push("NEXT");
+                }
+                for (k, a) in [(Key::Num1, "TAB0"), (Key::Num2, "TAB1"), (Key::Num3, "TAB2"), (Key::Num4, "TAB3"), (Key::Num5, "TAB4")] {
+                    if i.consume_key(Modifiers::CTRL, k) {
+                        acts.push(a);
+                    }
+                }
+            });
+            for a in acts {
+                match a {
+                    "SETTINGS" => self.show_settings = !self.show_settings,
+                    "SHORTCUTS" => self.show_shortcuts = !self.show_shortcuts,
+                    "FUZZY" => {
+                        self.show_fuzzy = !self.show_fuzzy;
+                        self.fuzzy = dialogs::Fuzzy::new();
+                    }
+                    "FSLIST" => self.settings.fs_list_view = !self.settings.fs_list_view,
+                    "FSDOT" => self.settings.hide_dotfiles = !self.settings.hide_dotfiles,
+                    "PASS" => self.pass_mode = !self.pass_mode,
+                    "RELOAD" => {
+                        self.t0 = None;
+                        self.tl = if self.settings.nointro { boot::Timeline::skipped() } else { boot::Timeline::new() };
+                        self.fs_started = false;
+                    }
+                    "NEXT" => self.cycle_tab(1),
+                    "PREV" => self.cycle_tab(-1),
+                    t => self.switch_tab(ctx, t[3..].parse::<usize>().unwrap_or(0)),
+                }
+            }
+        }
+
         // tasti fisici -> evidenzia sulla tastiera virtuale
-        for e in &events {
+        for e in events.iter().filter(|_| !modal_open && !self.pass_mode) {
             if let egui::Event::Text(tx) = e {
                 self.kb.flash_key(tx.to_uppercase(), now);
             }
         }
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(theme::BG))
+            .frame(egui::Frame::none().fill(theme::bg()))
             .show(ctx, |ui| {
                 let screen = ui.max_rect();
                 let (w, h) = (screen.width(), screen.height());
@@ -219,7 +367,10 @@ impl eframe::App for App {
                 let col_h = vh * 63.7;
                 let left = Rect::from_min_size(Pos2::new(screen.left() - vh * 0.555, col_top), Vec2::new(col_w, col_h));
                 let right = Rect::from_min_size(Pos2::new(screen.right() - col_w + vh * 0.555, col_top), Vec2::new(col_w, col_h));
-                self.sys.left_column(&p, left, vh, &fade);
+                let procs_rect = self.sys.left_column(&p, left, vh, &fade);
+                if intro_done && ui.interact(procs_rect, ui.id().with("toplist"), Sense::click()).clicked() {
+                    self.show_procs = true;
+                }
                 self.sys.right_column(&p, right, vh, &fade);
 
                 // ---- shell principale (65% x 60.3%)
@@ -259,13 +410,7 @@ impl eframe::App for App {
                         })
                         .collect();
                     if let Some(i) = shell::tabs(ui, tabs_rect, &labels, self.active, vh) {
-                        self.audio.play(audio::Snd::Folder);
-                        if self.terms[i].is_none() {
-                            self.terms[i] = Terminal::new(ctx).ok();
-                        }
-                        if self.terms[i].is_some() {
-                            self.active = i;
-                        }
+                        self.switch_tab(ctx, i);
                     }
 
                     let term_rect = Rect::from_min_max(
@@ -273,8 +418,11 @@ impl eframe::App for App {
                         Pos2::new(shell.right() - vh * 0.74, shell.bottom() - vh * 0.74),
                     );
                     let id = ui.id().with(("term", self.active));
+                    let fsize = vh * 1.67 * (self.settings.term_font_size / 15.0);
+                    let show_cursor = !self.settings.nocursor;
+                    let input_ok = !modal_open;
                     if let Some(Some(tm)) = self.terms.get_mut(active) {
-                        tm.ui(ui, term_rect, id, vh * 1.67);
+                        tm.ui(ui, term_rect, id, fsize, show_cursor, input_ok);
                     }
                 }
 
@@ -284,9 +432,10 @@ impl eframe::App for App {
                     let fs_rect = Rect::from_min_size(Pos2::new(screen.left() + vw * 0.5, bottom_top), Vec2::new(vw * 43.0, vh * 31.0));
                     let kb_rect = Rect::from_min_size(Pos2::new(screen.left() + vw * 44.0, bottom_top), Vec2::new(vw * 55.5, vh * 31.0));
 
-                    let nav = self.fs.ui(ui, fs_rect, vh, now);
+                    let ctrl_on = self.kb.ctrl_on();
+                    let fs_act = self.fs.ui(ui, fs_rect, vh, now, ctrl_on);
                     if fsk_a < 1.0 {
-                        p.rect_filled(fs_rect.expand(vh), 0.0, Color32::from_rgba_unmultiplied(5, 8, 13, ((1.0 - fsk_a) * 255.0) as u8));
+                        p.rect_filled(fs_rect.expand(vh), 0.0, theme::bg_a(1.0 - fsk_a));
                     }
                     let key = self.kb.ui(ui, kb_rect, vh, now);
                     self.kb.veil(&p, kb_rect, vh, (it - 1.58).max(0.0), fsk_a);
@@ -295,14 +444,25 @@ impl eframe::App for App {
                         self.audio.play(s);
                     }
                     let ksounds: Vec<audio::Snd> = self.kb.sounds.drain(..).collect();
-                    if term_visible {
-                        for s in ksounds {
-                            self.audio.play(s);
-                        }
-                        if let Some(path) = nav {
-                            if let Some(Some(tm)) = self.terms.get_mut(active) {
-                                tm.send(&format!("cd \"{}\"\r", path.display()));
+                    if term_visible && !modal_open {
+                        if !self.pass_mode {
+                            for s in ksounds {
+                                self.audio.play_feedback(s);
                             }
+                        }
+                        match fs_act {
+                            Some(fsdisp::FsAction::Cd(path)) => {
+                                if let Some(Some(tm)) = self.terms.get_mut(active) {
+                                    tm.send(&format!("cd \"{}\"\r", path.display()));
+                                }
+                            }
+                            Some(fsdisp::FsAction::Open(path)) => fsdisp::open_path(&path),
+                            Some(fsdisp::FsAction::WritePath(path)) => {
+                                if let Some(Some(tm)) = self.terms.get_mut(active) {
+                                    tm.send(&format!("\"{}\"", path.display()));
+                                }
+                            }
+                            None => {}
                         }
                         if let Some(sq) = key {
                             if let Some(Some(tm)) = self.terms.get_mut(active) {
@@ -312,13 +472,28 @@ impl eframe::App for App {
                     }
                 }
             });
+
+        // ---- finestre (impostazioni, scorciatoie, fuzzy finder, processi)
+        dialogs::settings_window(ctx, &mut self.show_settings, &mut self.settings);
+        dialogs::shortcuts_window(ctx, &mut self.show_shortcuts);
+        let names = if self.show_fuzzy { self.fs.names() } else { Vec::new() };
+        if let Some(name) = dialogs::fuzzy_window(ctx, &mut self.show_fuzzy, &mut self.fuzzy, &names) {
+            let q = if name.contains(' ') { format!("\"{name}\"") } else { name };
+            if let Some(Some(tm)) = self.terms.get_mut(self.active) {
+                tm.send(&q);
+            }
+        }
+        let rows = if self.show_procs { self.sys.process_rows() } else { Vec::new() };
+        dialogs::process_window(ctx, &mut self.show_procs, &mut self.procs_ui, rows);
     }
 }
 
 fn main() -> eframe::Result<()> {
+    let st = Settings::load();
+    let mut vb = egui::ViewportBuilder::default();
+    vb = if st.allow_windowed { vb.with_inner_size([1280.0, 800.0]).with_min_inner_size([960.0, 560.0]) } else { vb.with_fullscreen(true) };
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_fullscreen(true)
+        viewport: vb
             .with_icon(egui::IconData { rgba: include_bytes!("../assets/app_icon.rgba").to_vec(), width: 128, height: 128 })
             .with_title("eDEX-UI RS"),
         vsync: true,

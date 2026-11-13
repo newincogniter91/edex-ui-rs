@@ -10,6 +10,21 @@ Scarica `edex-ui-rs-setup.exe` (artifact `edex-ui-rs-installer` della build) ed 
 ## Avvio e audio
 All'avvio parte la sequenza originale: boot log, schermata del titolo con glitch, comparsa dei pannelli. Suoni e volumi sono quelli di eDEX-UI (tasti, output del terminale, cartelle, pannelli).
 
+## Impostazioni e scorciatoie
+Impostazioni (tema, tastiera, audio, orologio, ping, shell, ecc.) con **Ctrl+Shift+S**, salvate in `%APPDATA%\edex-ui-rs\settings.json`. I 21 temi e i 19 layout tastiera sono quelli di eDEX-UI.
+
+| Scorciatoia | Azione |
+|---|---|
+| Ctrl+Shift+C / Ctrl+Shift+V / click destro | copia selezione / incolla / incolla |
+| Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+1…5 | cambio tab |
+| Ctrl+Shift+S / K | impostazioni / elenco scorciatoie |
+| Ctrl+Shift+F | fuzzy finder sulla cartella corrente |
+| Ctrl+Shift+L / H | vista a lista / file nascosti |
+| Ctrl+Shift+P | modalità password (niente suoni dei tasti) |
+| Ctrl+Shift+F5 | rivede l'animazione iniziale |
+
+Il clic sui processi apre la tabella completa. La posizione sul globo usa una richiesta HTTP a ip-api.com (disattivabile nelle impostazioni).
+
 ## Licenza
 eDEX-UI è sotto GPL-3.0, quindi questo port è distribuito sotto GPL-3.0 (vedi `LICENSE`): chi riceve un binario ha diritto al sorgente.
 

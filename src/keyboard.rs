@@ -1,6 +1,6 @@
-use crate::theme::{self, fg_a, px, text, BG, FG};
+use crate::theme::{self, fg_a, px, text, bg, fg};
 use crate::audio::Snd;
-use eframe::egui::{self, Align2, Color32, Pos2, Rect, Sense, Stroke, Vec2};
+use eframe::egui::{self, Align2, Pos2, Rect, Sense, Stroke, Vec2};
 
 struct Key {
     name: String,
@@ -19,10 +19,12 @@ pub struct Keyboard {
 
 impl Keyboard {
     pub fn new(layout: &str) -> Self {
-        let raw = match layout {
-            "it-IT" => include_str!("../assets/kb_it-IT.json"),
-            _ => include_str!("../assets/kb_en-US.json"),
-        };
+        let raw = crate::data::LAYOUTS
+            .iter()
+            .find(|(n, _)| *n == layout)
+            .or_else(|| crate::data::LAYOUTS.iter().find(|(n, _)| *n == "en-US"))
+            .map(|(_, r)| *r)
+            .unwrap_or("{}");
         let v: serde_json::Value = serde_json::from_str(raw).unwrap_or(serde_json::Value::Null);
         let mut rows = Vec::new();
         for k in ["row_numbers", "row_1", "row_2", "row_3", "row_space"] {
@@ -36,6 +38,10 @@ impl Keyboard {
             rows.push(row);
         }
         Self { rows, shift: false, ctrl: false, flash: None, sounds: Vec::new() }
+    }
+
+    pub fn ctrl_on(&self) -> bool {
+        self.ctrl
     }
 
     /// Evidenzia il tasto fisico premuto.
@@ -91,9 +97,9 @@ impl Keyboard {
 
                 p.rect_stroke(kr, 0.0, Stroke::new(px(vh, 0.18), fg_a(if active { 1.0 } else { 0.0 })));
                 if active {
-                    p.rect_filled(kr, 0.0, FG);
+                    p.rect_filled(kr, 0.0, fg());
                 }
-                let col = if active { BG } else { FG };
+                let col = if active { bg() } else { fg() };
                 if let Some(dir) = key.name.strip_prefix("ESCAPED|-- ICON: ARROW_") {
                     arrow(&p, kr, dir, col, vh);
                     if resp.clicked() {
@@ -145,7 +151,7 @@ impl Keyboard {
                 }
             }
         }
-        let _ = theme::FG;
+        let _ = theme::fg();
         out
     }
 }
@@ -177,12 +183,12 @@ impl Keyboard {
                 p.rect_filled(
                     Rect::from_min_max(Pos2::new(x0, y - vh * 0.3), Pos2::new(r.right() + vh, y + row_h)),
                     0.0,
-                    Color32::from_rgb(5, 8, 13),
+                    theme::bg(),
                 );
             }
         }
         if alpha < 0.999 {
-            p.rect_filled(r.expand(vh * 0.5), 0.0, Color32::from_rgba_unmultiplied(5, 8, 13, ((1.0 - alpha) * 255.0) as u8));
+            p.rect_filled(r.expand(vh * 0.5), 0.0, theme::bg_a(1.0 - alpha));
         }
     }
 }

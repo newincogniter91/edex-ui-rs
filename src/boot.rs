@@ -1,5 +1,5 @@
 use crate::audio::Snd;
-use crate::theme::{self, fg_a, px, BG, FG};
+use crate::theme::{self, fg_a, px, bg, fg};
 use eframe::egui::{Color32, Painter, Pos2, Rect, Stroke, Vec2};
 
 /// Durata dell'animazione di comparsa dell'interfaccia dopo il titolo (secondi).
@@ -60,6 +60,11 @@ impl Timeline {
         Self { events, chunks, title_start, ui_start, next: 0 }
     }
 
+    /// Senza animazione iniziale (impostazione "nointro").
+    pub fn skipped() -> Self {
+        Self { events: Vec::new(), chunks: Vec::new(), title_start: 0.0, ui_start: 0.0, next: 0 }
+    }
+
     /// Suoni da riprodurre fino al tempo `t`.
     pub fn poll(&mut self, t: f64) -> Vec<Snd> {
         let mut out = Vec::new();
@@ -79,7 +84,7 @@ impl Timeline {
         }
         let g = p.layout(s, theme::font(vh * 1.4, "mono"), Color32::PLACEHOLDER, screen.width());
         let pos = Pos2::new(screen.left(), screen.bottom() - g.size().y);
-        p.galley(pos, g, FG);
+        p.galley(pos, g, fg());
     }
 }
 
@@ -101,10 +106,10 @@ pub fn draw_title(p: &Painter, screen: Rect, vh: f32, t: f64) {
         p.galley(pos, g, fg_a(fade));
         p.line_segment([b.left_bottom(), b.right_bottom()], line);
     } else if t < 1.0 {
-        p.rect_filled(b, 0.0, FG);
-        p.galley(pos, g, FG);
+        p.rect_filled(b, 0.0, fg());
+        p.galley(pos, g, fg());
     } else if t < 1.1 {
-        p.rect_stroke(b, 0.0, Stroke::new(bw, FG));
+        p.rect_stroke(b, 0.0, Stroke::new(bw, fg()));
     } else if t < 1.6 {
         // glitch: due copie del testo (parte alta e bassa) che oscillano ogni 50 ms
         let ph = (t * 20.0) % 2.0;
@@ -116,8 +121,8 @@ pub fn draw_title(p: &Painter, screen: Rect, vh: f32, t: f64) {
         p.with_clip_rect(top).galley(Pos2::new(pos.x + dx_top, pos.y), g.clone(), fg_a(0.8));
         p.with_clip_rect(bot).galley(Pos2::new(pos.x + dx_bot, pos.y), g, fg_a(0.9));
     } else {
-        p.galley(pos, g, FG);
-        p.rect_stroke(b, 0.0, Stroke::new(bw, FG));
+        p.galley(pos, g, fg());
+        p.rect_stroke(b, 0.0, Stroke::new(bw, fg()));
     }
-    let _ = BG;
+    let _ = bg();
 }
