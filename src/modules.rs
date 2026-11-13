@@ -5,7 +5,7 @@ use crate::theme::{self, fg_a, px, text, fg};
 use eframe::egui::{Align2, Painter, Pos2, Rect, Shape, Stroke, Vec2};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
-use sysinfo::{Networks, System};
+use sysinfo::{CpuRefreshKind, Networks, System};
 
 const HISTORY: usize = 60;
 
@@ -65,7 +65,7 @@ pub struct ProcRow {
 impl SysPanels {
     pub fn new(st: &Settings) -> Self {
         let mut sys = System::new();
-        sys.refresh_cpu_usage();
+        sys.refresh_cpu_specifics(CpuRefreshKind::new().with_cpu_usage().with_frequency());
         sys.refresh_memory();
         sys.refresh_processes();
         let n = sys.cpus().len().max(1);
@@ -134,7 +134,7 @@ impl SysPanels {
         let secs = dt.as_secs_f32().max(0.1);
         self.last_refresh = Instant::now();
 
-        self.sys.refresh_cpu_usage();
+        self.sys.refresh_cpu_specifics(CpuRefreshKind::new().with_cpu_usage().with_frequency());
         self.sys.refresh_memory();
         self.sys.refresh_processes();
         self.nets.refresh();
