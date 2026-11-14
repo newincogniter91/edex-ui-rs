@@ -41,7 +41,6 @@ struct App {
     show_procs: bool,
     procs_ui: dialogs::ProcUi,
     pass_mode: bool,
-    auto_pass: bool,
 }
 
 impl App {
@@ -81,7 +80,6 @@ impl App {
             show_procs: false,
             procs_ui: dialogs::ProcUi { key: 2, asc: false },
             pass_mode: false,
-            auto_pass: false,
         }
     }
 
@@ -232,10 +230,7 @@ impl eframe::App for App {
 
         // suoni dei tasti fisici (come nell'originale: keydown -> stdin, Invio rilasciato -> granted)
         let events: Vec<egui::Event> = ctx.input(|i| i.events.clone());
-        // prompt di password rilevato nel terminale attivo -> stessa modalità di Ctrl+Shift+P
-        self.auto_pass = self.terms.get(self.active).and_then(|t| t.as_ref()).map_or(false, |t| t.password_prompt());
-        let quiet = self.pass_mode || self.auto_pass;
-        if term_visible && !modal_open && !quiet {
+        if term_visible && !modal_open && !self.pass_mode {
             for e in &events {
                 match e {
                     egui::Event::Key { pressed: true, .. } => self.audio.play_feedback(audio::Snd::Stdin),
@@ -322,7 +317,7 @@ impl eframe::App for App {
         }
 
         // tasti fisici -> evidenzia sulla tastiera virtuale
-        for e in events.iter().filter(|_| !modal_open && !quiet) {
+        for e in events.iter().filter(|_| !modal_open && !self.pass_mode) {
             if let egui::Event::Text(tx) = e {
                 self.kb.flash_key(tx.to_uppercase(), now);
             }
@@ -450,7 +445,7 @@ impl eframe::App for App {
                     }
                     let ksounds: Vec<audio::Snd> = self.kb.sounds.drain(..).collect();
                     if term_visible && !modal_open {
-                        if !quiet {
+                        if !self.pass_mode {
                             for s in ksounds {
                                 self.audio.play_feedback(s);
                             }
@@ -493,7 +488,25 @@ impl eframe::App for App {
     }
 }
 
+/// Finché l'app è aperta Windows non va in sospensione né avvia lo screensaver / spegne lo schermo.
+#[cfg(windows)]
+fn keep_awake(on: bool) {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn SetThreadExecutionState(flags: u32) -> u32;
+    }
+    const ES_CONTINUOUS: u32 = 0x8000_0000;
+    const ES_SYSTEM_REQUIRED: u32 = 0x0000_0001;
+    const ES_DISPLAY_REQUIRED: u32 = 0x0000_0002;
+    let flags = if on { ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED } else { ES_CONTINUOUS };
+    unsafe {
+        SetThreadExecutionState(flags);
+    }
+}
+
 fn main() -> eframe::Result<()> {
+    #[cfg(windows)]
+    keep_awake(true);
     let st = Settings::load();
     let mut vb = egui::ViewportBuilder::default();
     vb = if st.allow_windowed { vb.with_inner_size([1280.0, 800.0]).with_min_inner_size([960.0, 560.0]) } else { vb.with_fullscreen(true) };
@@ -508,5 +521,8 @@ fn main() -> eframe::Result<()> {
         renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
-    eframe::run_native("eDEX-UI RS", options, Box::new(|cc| Box::new(App::new(cc))))
+    let res = eframe::run_native("eDEX-UI RS", options, Box::new(|cc| Box::new(App::new(cc))));
+    #[cfg(windows)]
+    keep_awake(false);
+    res
 }
