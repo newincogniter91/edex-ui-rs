@@ -11,7 +11,7 @@ Guida per un'altra IA (o una persona) che prende in mano questo progetto. Leggil
 ## Regole del proprietario (vanno rispettate)
 1. **Fai solo le modifiche richieste.** Niente refactoring, sostituzioni o "miglioramenti" non chiesti.
 2. **Modifiche mirate.** Per bug piccoli usa sostituzioni puntuali (`str_replace`), non riscrivere interi file: risparmia token.
-3. **Rispondi in modo diretto e fattuale** alle domande specifiche, senza dirottare su strumenti o approcci alternativi non richiesti. Parla in italiano.
+3. **Rispondi in modo diretto e fattuale** alle domande specifiche, senza dirottare su strumenti o approcci alternativi non richiesti.
 4. **Push:** non fare push finché il proprietario non lo chiede o non dà l'ok. Ogni push su `main` fa partire la build di tutti e tre i lavori. Per un push di sola documentazione usa `[skip ci]` nel messaggio del commit. Dopo un push che avvia la build **non aspettarne il completamento**: dai il link del run e basta.
 5. **Release: solo lettura.** Puoi leggere le release e i loro file, mai creare, modificare, cancellare né fare richieste di scrittura "di prova" sull'endpoint delle release. Le release le fa il proprietario a mano. Il workflow non deve creare release né partire sui tag.
 6. **Credenziali:** se ti viene dato un token GitHub, usalo solo per quello che serve, non scriverlo in file, commit, log o memoria. Ricorda al proprietario di revocarlo a fine lavoro.
