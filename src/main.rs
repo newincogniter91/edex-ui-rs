@@ -485,6 +485,44 @@ impl eframe::App for App {
         }
         let rows = if self.show_procs { self.sys.process_rows() } else { Vec::new() };
         dialogs::process_window(ctx, &mut self.show_procs, &mut self.procs_ui, rows);
+
+        draw_pointer(ctx, &self.settings);
+    }
+}
+
+/// Cursore del mouse disegnato dall'app (freccia, mano o barra di testo) nei colori del tema.
+fn draw_pointer(ctx: &egui::Context, st: &Settings) {
+    if !st.app_cursor {
+        return;
+    }
+    let icon = ctx.output(|o| o.cursor_icon);
+    ctx.set_cursor_icon(egui::CursorIcon::None);
+    let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) else { return };
+    let vh = ctx.screen_rect().height() / 100.0;
+    let u = (vh * 1.1).max(9.0) * st.cursor_scale.clamp(0.5, 3.0);
+    let col = theme::fg();
+    let stroke = Stroke::new((u * 0.09).max(1.0), col);
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("edex_pointer")));
+    match icon {
+        egui::CursorIcon::Text => {
+            p.line_segment([pos + Vec2::new(0.0, -u * 0.7), pos + Vec2::new(0.0, u * 0.7)], stroke);
+            for s in [-1.0, 1.0] {
+                p.line_segment([pos + Vec2::new(-u * 0.25, s * u * 0.7), pos + Vec2::new(u * 0.25, s * u * 0.7)], stroke);
+            }
+        }
+        egui::CursorIcon::PointingHand | egui::CursorIcon::Grab | egui::CursorIcon::Grabbing => {
+            p.circle_stroke(pos, u * 0.55, stroke);
+            p.circle_filled(pos, u * 0.14, col);
+        }
+        _ => {
+            let pts = vec![
+                pos,
+                pos + Vec2::new(0.0, u * 1.45),
+                pos + Vec2::new(u * 0.95, u * 1.0),
+            ];
+            p.add(egui::Shape::convex_polygon(pts, theme::bg_a(0.85), stroke));
+            p.circle_filled(pos, u * 0.1, col);
+        }
     }
 }
 

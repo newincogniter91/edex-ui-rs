@@ -85,6 +85,12 @@ pub fn settings_window(ctx: &egui::Context, open: &mut bool, st: &mut Settings) 
                 lbl(ui, "No cursor");
                 ui.checkbox(&mut st.nocursor, "");
                 ui.end_row();
+                lbl(ui, "Hide system cursor (use app cursor)");
+                ui.checkbox(&mut st.app_cursor, "");
+                ui.end_row();
+                lbl(ui, "App cursor size");
+                ui.add_enabled(st.app_cursor, egui::Slider::new(&mut st.cursor_scale, 0.5..=3.0).step_by(0.1));
+                ui.end_row();
 
                 lbl(ui, "Shell (new tabs)");
                 ui.add(egui::TextEdit::singleline(&mut st.shell).desired_width(180.0));

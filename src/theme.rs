@@ -93,6 +93,20 @@ pub fn indexed(i: u8) -> Color32 {
     }
 }
 
+/// Riporta un colore qualsiasi del terminale (ANSI, 256 colori, RGB) ai colori del tema:
+/// resta solo la luminosità, che sceglie una tinta tra sfondo e primo piano del tema.
+pub fn tint(r: u8, g: u8, b: u8, is_fg: bool) -> Color32 {
+    let p = pal();
+    let lum = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0;
+    let (from, to, t) = if is_fg {
+        (p.term_bg, p.term_fg, 0.35 + 0.65 * lum)
+    } else {
+        (p.term_bg, p.term_fg, 0.4 * lum)
+    };
+    let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
+    Color32::from_rgb(mix(from[0], to[0]), mix(from[1], to[1]), mix(from[2], to[2]))
+}
+
 /// Famiglie di font: "main" (United Sans Medium), "light" (United Sans Light), "mono" (Fira Mono).
 pub fn font(size: f32, fam: &str) -> FontId {
     let f = match fam {

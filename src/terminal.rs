@@ -406,8 +406,11 @@ fn color_of(c: vt100::Color, is_fg: bool) -> Color32 {
                 theme::term_bg()
             }
         }
-        vt100::Color::Idx(i) => theme::indexed(i),
-        vt100::Color::Rgb(r, g, b) => Color32::from_rgb(r, g, b),
+        vt100::Color::Idx(i) => {
+            let c = theme::indexed(i);
+            theme::tint(c.r(), c.g(), c.b(), is_fg)
+        }
+        vt100::Color::Rgb(r, g, b) => theme::tint(r, g, b, is_fg),
     }
 }
 
