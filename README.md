@@ -7,6 +7,11 @@ L'app parte a schermo intero. Layout e tema "tron" ricalcano l'originale: colonn
 ## Installazione
 Scarica `edex-ui-rs-setup.exe` (artifact `edex-ui-rs-installer` della build) ed eseguilo: installa in Programmi, crea i collegamenti nel menu Start (e sul desktop, se vuoi) e un disinstallatore.
 
+### Linux (x86_64 e aarch64)
+Scarica `edex-ui-rs-2.0.0-linux-x86_64.tar.gz` oppure `edex-ui-rs-2.0.0-linux-aarch64.tar.gz` (artifact `edex-ui-rs-linux-x86_64` / `edex-ui-rs-linux-aarch64` della build), estrai e lancia `./install.sh`: installa l'app per il tuo utente in `~/.local/bin` e aggiunge la voce nel menu applicazioni. In alternativa avvia direttamente `./edex-ui-rs`.
+
+Requisiti: sessione X11 o Wayland, OpenGL 3.x (anche software/Mesa), la libreria `libasound2` per l'audio (l'app parte anche senza scheda audio) e una shell (usa `$SHELL`). Compilato su Ubuntu 22.04, quindi gira su distribuzioni con glibc 2.35 o più recente.
+
 ## Avvio e audio
 All'avvio parte la sequenza originale: boot log, schermata del titolo con glitch, comparsa dei pannelli. Suoni e volumi sono quelli di eDEX-UI (tasti, output del terminale, cartelle, pannelli).
 
@@ -40,4 +45,4 @@ eDEX-UI è sotto GPL-3.0, quindi questo port è distribuito sotto GPL-3.0 (vedi 
 - Punti dei continenti del globo e regole di abbinamento icone/estensioni: derivati dai dati di eDEX-UI (GPL-3.0).
 
 ## Da fare
-Altri temi, impostazioni, build Linux.
+Altri temi.

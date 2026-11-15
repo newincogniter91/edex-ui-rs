@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=eDEX-UI RS
+Comment=Terminale a tema fantascientifico (port di eDEX-UI in Rust)
+Exec=edex-ui-rs
+Icon=edex-ui-rs
+Terminal=false
+Categories=System;TerminalEmulator;

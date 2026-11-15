@@ -24,3 +24,35 @@ jobs:
         with:
           name: edex-ui-rs-installer
           path: dist/edex-ui-rs-setup.exe
+
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Dipendenze di build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libgl1-mesa-dev
+      - name: Build
+        run: cargo build --release
+      - name: Pacchetto tar.gz
+        run: |
+          v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          d="edex-ui-rs-$v-linux-${{ matrix.arch }}"
+          mkdir -p "dist/$d"
+          cp target/release/edex-ui-rs linux/install.sh linux/edex-ui-rs.desktop linux/edex-ui-rs.png LICENSE README.md "dist/$d/"
+          tar -C dist -czf "dist/$d.tar.gz" "$d"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edex-ui-rs-linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
